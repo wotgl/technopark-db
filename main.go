@@ -83,6 +83,18 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 	panic(err.Error()) // proper error handling instead of panic in your app
 }
 
+func createIvalidResponse() string {
+	responseCode := 2
+	errorMessage := map[string]interface{}{"msg": "Invalid"}
+
+	resp, err := createResponse(responseCode, errorMessage)
+	if err != nil {
+		panic(err)
+	}
+
+	return resp
+}
+
 // ======================
 // Database queries here
 // ======================
@@ -288,14 +300,7 @@ func (u *User) create() string {
 		args = append(args, false)
 	} else {
 		if isAnonymous != false && isAnonymous != true {
-			responseCode := 2
-			errorMessage := map[string]interface{}{"msg": "Invalid type isAnonymous"}
-
-			resp, err := createResponse(responseCode, errorMessage)
-			if err != nil {
-				panic(err)
-			}
-
+			resp = createIvalidResponse()
 			return resp
 		}
 		args = append(args, isAnonymous)
@@ -333,84 +338,88 @@ func (u *User) create() string {
 		"username":    newUser.values[0]["username"],
 	}
 
-	response, err := createResponse(responseCode, responseMsg)
+	resp, err = createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
 
 	fmt.Println("user.create()")
 
-	return response
+	return resp
 }
 
 func (u *User) getDetails() string {
 	var resp string
+	if len(u.inputRequest.query["user"]) != 1 {
+		resp = createIvalidResponse()
+		return resp
+	}
 
-	// query = "SELECT * FROM user WHERE email = ?"
-	// args = args[0:0]
-	// args = append(args, dbResp.lastId)
-	// newUser, err := selectQuery(query, &args, u.db)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	return resp
-	/*
-		// Prepare statement for reading data
-		stmtOut, err := u.db.Prepare("SELECT * FROM user WHERE email = ?;")
-		if err != nil {
-			panic(err.Error()) // proper error handling instead of panic in your app
-		}
-		defer stmtOut.Close()
+	query := "SELECT * FROM user WHERE email = ?"
+	var args []interface{}
+	args = append(args, u.inputRequest.query["user"][0])
 
-		type User struct {
-			Id          int    `json:"id"`
-			Username    string `json:"username"`
-			About       string `json:"about"`
-			Name        string `json:"name"`
-			Email       string `json:"email"`
-			IsAnonymous bool   `json:"isAnonymous"`
-			Date        string `json:"date"`
-		}
+	getUser, err := selectQuery(query, &args, u.db)
+	if err != nil {
+		panic(err)
+	}
 
-		user := new(User)
+	if getUser.rows == 0 {
+		responseCode := 1
+		errorMessage := map[string]interface{}{"msg": "Not found"}
 
-		// Query the square-number of 13
-		err = stmtOut.QueryRow(u.inputRequest.query["user"][0]).Scan(&user.Id, &user.Username, &user.About, &user.Name, &user.Email, &user.IsAnonymous, &user.Date) // WHERE number = 13
-		if err != nil {
-			if err == sql.ErrNoRows {
-				var responseCode int
-				var errorMessage map[string]interface{}
-
-				responseCode = 1
-				errorMessage = map[string]interface{}{"msg": "Doesn`t exist"}
-
-				response, err := createResponse(responseCode, errorMessage)
-				if err != nil {
-					panic(err.Error())
-				}
-
-				fmt.Println("user.getDetails()")
-				return response
-			}
-			panic(err.Error()) // proper error handling instead of panic in your app
-		}
-
-		type Response struct {
-			Code     int   `json:"code"`
-			Response *User `json:"response"`
-		}
-
-		tempResponse := Response{0, user}
-
-		response, err := json.Marshal(tempResponse)
+		resp, err = createResponse(responseCode, errorMessage)
 		if err != nil {
 			panic(err)
 		}
 
-		fmt.Println("user.getDetails()")
+		return resp
+	}
 
-		return string(response)
-	*/
+	// followers here
+	query = "SELECT follower FROM follow WHERE followee = ?"
+	getUserFollowers, err := selectQuery(query, &args, u.db)
+	if err != nil {
+		panic(err)
+	}
+
+	var listFollowers []string
+	for _, value := range getUserFollowers.values {
+		listFollowers = append(listFollowers, value["follower"])
+	}
+
+	// following here
+	query = "SELECT followee FROM follow WHERE follower = ?"
+	getUserFollowing, err := selectQuery(query, &args, u.db)
+	if err != nil {
+		panic(err)
+	}
+
+	var listFollowing []string
+	for _, value := range getUserFollowing.values {
+		listFollowing = append(listFollowing, value["followee"])
+	}
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"about":       getUser.values[0]["about"],
+		"email":       getUser.values[0]["email"],
+		"followers":   listFollowers,
+		"following":   listFollowing,
+		"id":          getUser.values[0]["id"],
+		"isAnonymous": getUser.values[0]["isAnonymous"],
+		"name":        getUser.values[0]["name"],
+		"username":    getUser.values[0]["username"],
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Println("user.getDetails()")
+
+	return resp
 }
 
 func (u *User) follow() string {
