@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"reflect"
+	"strconv"
 
 	mysql "github.com/go-sql-driver/mysql"
 )
@@ -280,10 +281,24 @@ func (u *User) create() string {
 	args = append(args, u.inputRequest.json["about"])
 	args = append(args, u.inputRequest.json["name"])
 	args = append(args, u.inputRequest.json["email"])
-	if u.inputRequest.json["isAnonymous"] == nil {
+
+	// Validate isAnonymous param
+	isAnonymous := u.inputRequest.json["isAnonymous"]
+	if isAnonymous == nil {
 		args = append(args, false)
 	} else {
-		args = append(args, u.inputRequest.json["isAnonymous"])
+		if isAnonymous != false && isAnonymous != true {
+			responseCode := 2
+			errorMessage := map[string]interface{}{"msg": "Invalid type isAnonymous"}
+
+			resp, err := createResponse(responseCode, errorMessage)
+			if err != nil {
+				panic(err)
+			}
+
+			return resp
+		}
+		args = append(args, isAnonymous)
 	}
 
 	dbResp, err := execQuery(query, &args, u.db)
@@ -306,12 +321,14 @@ func (u *User) create() string {
 		panic(err)
 	}
 
+	respIsAnonymous, _ := strconv.ParseBool(newUser.values[0]["isAnonymous"])
+
 	responseCode := 0
 	responseMsg := map[string]interface{}{
 		"about":       newUser.values[0]["about"],
 		"email":       newUser.values[0]["email"],
 		"id":          dbResp.lastId,
-		"isAnonymous": newUser.values[0]["isAnonymous"],
+		"isAnonymous": respIsAnonymous,
 		"name":        newUser.values[0]["name"],
 		"username":    newUser.values[0]["username"],
 	}
@@ -324,111 +341,76 @@ func (u *User) create() string {
 	fmt.Println("user.create()")
 
 	return response
-
-	// args := createArgs()
-	/*
-		// Prepare statement for inserting data
-		stmtIns, err := u.db.Prepare("INSERT INTO user (username, about, name, email, isAnonymous) VALUES(?, ?, ?, ?, ?)") // ? = placeholder
-		if err != nil {
-			panic(err.Error()) // proper error handling instead of panic in your app
-		}
-		defer stmtIns.Close() // Close the statement when we leave main() / the program terminates
-
-
-
-		res, err := stmtIns.Exec(username, about, name, email, isAnonymous)
-		if err != nil {
-			responseCode, errorMessage := errorExecParse(err)
-
-			response, err := createResponse(responseCode, errorMessage)
-			if err != nil {
-				panic(err.Error())
-			}
-
-			return response
-
-			// panic(err.Error()) // proper error handling instead of panic in your app
-		}
-
-		insertId, err := res.LastInsertId()
-
-		responseCode := 0
-		responseMsg := map[string]interface{}{
-			"about":       about,
-			"email":       email,
-			"id":          insertId,
-			"isAnonymous": isAnonymous,
-			"name":        name,
-			"username":    username,
-		}
-
-		response, err := createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-
-		fmt.Println("user.create()")
-
-		return response
-	*/
 }
 
 func (u *User) getDetails() string {
-	// Prepare statement for reading data
-	stmtOut, err := u.db.Prepare("SELECT * FROM user WHERE email = ?;")
-	if err != nil {
-		panic(err.Error()) // proper error handling instead of panic in your app
-	}
-	defer stmtOut.Close()
+	var resp string
 
-	type User struct {
-		Id          int    `json:"id"`
-		Username    string `json:"username"`
-		About       string `json:"about"`
-		Name        string `json:"name"`
-		Email       string `json:"email"`
-		IsAnonymous bool   `json:"isAnonymous"`
-		Date        string `json:"date"`
-	}
-
-	user := new(User)
-
-	// Query the square-number of 13
-	err = stmtOut.QueryRow(u.inputRequest.query["user"][0]).Scan(&user.Id, &user.Username, &user.About, &user.Name, &user.Email, &user.IsAnonymous, &user.Date) // WHERE number = 13
-	if err != nil {
-		if err == sql.ErrNoRows {
-			var responseCode int
-			var errorMessage map[string]interface{}
-
-			responseCode = 1
-			errorMessage = map[string]interface{}{"msg": "Doesn`t exist"}
-
-			response, err := createResponse(responseCode, errorMessage)
-			if err != nil {
-				panic(err.Error())
-			}
-
-			fmt.Println("user.getDetails()")
-			return response
+	// query = "SELECT * FROM user WHERE email = ?"
+	// args = args[0:0]
+	// args = append(args, dbResp.lastId)
+	// newUser, err := selectQuery(query, &args, u.db)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	return resp
+	/*
+		// Prepare statement for reading data
+		stmtOut, err := u.db.Prepare("SELECT * FROM user WHERE email = ?;")
+		if err != nil {
+			panic(err.Error()) // proper error handling instead of panic in your app
 		}
-		panic(err.Error()) // proper error handling instead of panic in your app
-	}
+		defer stmtOut.Close()
 
-	type Response struct {
-		Code     int   `json:"code"`
-		Response *User `json:"response"`
-	}
+		type User struct {
+			Id          int    `json:"id"`
+			Username    string `json:"username"`
+			About       string `json:"about"`
+			Name        string `json:"name"`
+			Email       string `json:"email"`
+			IsAnonymous bool   `json:"isAnonymous"`
+			Date        string `json:"date"`
+		}
 
-	tempResponse := Response{0, user}
+		user := new(User)
 
-	response, err := json.Marshal(tempResponse)
-	if err != nil {
-		panic(err)
-	}
+		// Query the square-number of 13
+		err = stmtOut.QueryRow(u.inputRequest.query["user"][0]).Scan(&user.Id, &user.Username, &user.About, &user.Name, &user.Email, &user.IsAnonymous, &user.Date) // WHERE number = 13
+		if err != nil {
+			if err == sql.ErrNoRows {
+				var responseCode int
+				var errorMessage map[string]interface{}
 
-	fmt.Println("user.getDetails()")
+				responseCode = 1
+				errorMessage = map[string]interface{}{"msg": "Doesn`t exist"}
 
-	return string(response)
+				response, err := createResponse(responseCode, errorMessage)
+				if err != nil {
+					panic(err.Error())
+				}
+
+				fmt.Println("user.getDetails()")
+				return response
+			}
+			panic(err.Error()) // proper error handling instead of panic in your app
+		}
+
+		type Response struct {
+			Code     int   `json:"code"`
+			Response *User `json:"response"`
+		}
+
+		tempResponse := Response{0, user}
+
+		response, err := json.Marshal(tempResponse)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Println("user.getDetails()")
+
+		return string(response)
+	*/
 }
 
 func (u *User) follow() string {
