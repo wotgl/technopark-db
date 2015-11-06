@@ -28,3 +28,6 @@ test/*
 
 #TODO
 TODO
+
+# Feature modules
+modules/*
