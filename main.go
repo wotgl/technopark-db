@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -68,8 +69,8 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 
 		// Error 1452: Cannot add or update a child row: a foreign key constraint fails
 		case 1452:
-			responseCode = 1
-			errorMessage = map[string]interface{}{"msg": "Not found"}
+			responseCode = 5
+			errorMessage = map[string]interface{}{"msg": "Exist [Error 1452]"}
 
 		default:
 			fmt.Println("errorExecParse() default")
@@ -93,6 +94,19 @@ func createIvalidResponse() string {
 	}
 
 	return resp
+}
+
+func validateJson(ir *InputRequest, args ...string) (string, error) {
+	var resp string
+
+	for _, value := range args {
+		if reflect.TypeOf(ir.json[value]) == nil {
+			resp = createIvalidResponse()
+			return resp, errors.New("Invalid json")
+		}
+	}
+
+	return "", nil
 }
 
 // ======================
@@ -245,49 +259,16 @@ type User struct {
 	}
 }
 
-func (u *User) checkUser(email string) error {
-	stmtOut, err := u.db.Prepare("SELECT * FROM user WHERE email = ?")
-	if err != nil {
-		panic(err.Error()) // proper error handling instead of panic in your app
-	}
-	defer stmtOut.Close()
-
-	// user := map[string]interface{}{
-	// 	"Id":          0,
-	// 	"Username":    "",
-	// 	"About":       "",
-	// 	"Name":        "",
-	// 	"Email":       "",
-	// 	"IsAnonymous": false,
-	// 	"Date":        "",
-	// }
-
-	// user := map[string]interface{}{
-	// 	"Id":          int,
-	// 	"Username":    string,
-	// 	"About":       "",
-	// 	"Name":        "",
-	// 	"Email":       "",
-	// 	"IsAnonymous": "",
-	// 	"Date":        "",
-	// }
-
-	err = stmtOut.QueryRow(email).Scan(&u.userResponse.Id, &u.userResponse.Username, &u.userResponse.About, &u.userResponse.Name, &u.userResponse.Email, &u.userResponse.IsAnonymous, &u.userResponse.Date) // WHERE number = 13
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return err
-		}
-		panic(err.Error()) // proper error handling instead of panic in your app
-	}
-
-	return err
-}
-
 func (u *User) create() string {
 	var resp string
 	query := "INSERT INTO user (username, about, name, email, isAnonymous) VALUES(?, ?, ?, ?, ?)"
 
 	var args []interface{}
+
+	resp, err := validateJson(u.inputRequest, "username", "about", "name", "email")
+	if err != nil {
+		return resp
+	}
 
 	args = append(args, u.inputRequest.json["username"])
 	args = append(args, u.inputRequest.json["about"])
@@ -383,7 +364,7 @@ func (u *User) getDetails() string {
 		panic(err)
 	}
 
-	var listFollowers []string
+	listFollowers := make([]string, 0)
 	for _, value := range getUserFollowers.values {
 		listFollowers = append(listFollowers, value["follower"])
 	}
@@ -395,10 +376,12 @@ func (u *User) getDetails() string {
 		panic(err)
 	}
 
-	var listFollowing []string
+	listFollowing := make([]string, 0)
 	for _, value := range getUserFollowing.values {
 		listFollowing = append(listFollowing, value["followee"])
 	}
+
+	respIsAnonymous, _ := strconv.ParseBool(getUser.values[0]["isAnonymous"])
 
 	responseCode := 0
 	responseMsg := map[string]interface{}{
@@ -407,7 +390,7 @@ func (u *User) getDetails() string {
 		"followers":   listFollowers,
 		"following":   listFollowing,
 		"id":          getUser.values[0]["id"],
-		"isAnonymous": getUser.values[0]["isAnonymous"],
+		"isAnonymous": respIsAnonymous,
 		"name":        getUser.values[0]["name"],
 		"username":    getUser.values[0]["username"],
 	}
@@ -423,166 +406,103 @@ func (u *User) getDetails() string {
 }
 
 func (u *User) follow() string {
-	stmtIns, err := u.db.Prepare("INSERT INTO follow (follower, followee) VALUES(?, ?)") // ? = placeholder
+	var resp string
+	query := "INSERT INTO follow (follower, followee) VALUES(?, ?)"
+
+	var args []interface{}
+
+	resp, err := validateJson(u.inputRequest, "follower", "followee")
 	if err != nil {
-		panic(err.Error()) // proper error handling instead of panic in your app
+		return resp
 	}
-	defer stmtIns.Close() // Close the statement when we leave main() / the program terminates
 
-	follower := u.inputRequest.json["follower"]
-	followee := u.inputRequest.json["followee"]
+	args = append(args, u.inputRequest.json["follower"])
+	args = append(args, u.inputRequest.json["followee"])
 
-	_, err = stmtIns.Exec(follower, followee)
-
+	_, err = execQuery(query, &args, u.db)
 	if err != nil {
+		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
 
-		response, err := createResponse(responseCode, errorMessage)
+		resp, err = createResponse(responseCode, errorMessage)
 		if err != nil {
-			panic(err.Error())
+			panic(err)
 		}
 
-		return response
-
-		panic(err.Error()) // proper error handling instead of panic in your app
+		return resp
 	}
 
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"about": "lol",
-	}
+	u.inputRequest.query["user"] = append(u.inputRequest.query["user"], u.inputRequest.json["follower"].(string))
+	resp = u.getDetails()
 
-	response, err := createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	fmt.Println("user.follow()")
-
-	return response
+	return resp
 }
 
 func (u *User) unfollow() string {
-	stmtIns, err := u.db.Prepare("DELETE FROM follow WHERE follower = ? AND followee = ?") // ? = placeholder
+	var resp string
+	query := "DELETE FROM follow WHERE follower = ? AND followee = ?"
+
+	var args []interface{}
+
+	resp, err := validateJson(u.inputRequest, "follower", "followee")
 	if err != nil {
-		panic(err.Error()) // proper error handling instead of panic in your app
+		return resp
 	}
-	defer stmtIns.Close() // Close the statement when we leave main() / the program terminates
 
-	follower := u.inputRequest.json["follower"]
-	followee := u.inputRequest.json["followee"]
+	args = append(args, u.inputRequest.json["follower"])
+	args = append(args, u.inputRequest.json["followee"])
 
-	_, err = stmtIns.Exec(follower, followee)
-
+	_, err = execQuery(query, &args, u.db)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			var responseCode int
-			var errorMessage map[string]interface{}
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
 
-			responseCode = 1
-			errorMessage = map[string]interface{}{"msg": "Doesn`t exist"}
-
-			response, err := createResponse(responseCode, errorMessage)
-			if err != nil {
-				panic(err.Error())
-			}
-
-			fmt.Println("user.unfollow()")
-			return response
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
 		}
-		panic(err.Error()) // proper error handling instead of panic in your app
+
+		return resp
 	}
 
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"about": "lol",
-	}
+	u.inputRequest.query["user"] = append(u.inputRequest.query["user"], u.inputRequest.json["follower"].(string))
+	resp = u.getDetails()
 
-	response, err := createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	fmt.Println("user.unfollow()")
-
-	return response
+	return resp
 }
 
 func (u *User) updateProfile() string {
-	email, ok := u.inputRequest.json["email"].(string)
-	if !ok {
-		panic(ok)
-	}
-	about, ok := u.inputRequest.json["about"].(string)
-	if !ok {
-		panic(ok)
-	}
-	name, ok := u.inputRequest.json["name"].(string)
-	if !ok {
-		panic(ok)
-	}
+	var resp string
+	query := "UPDATE user SET about = ?, name = ? WHERE email =  ?"
 
-	// Check user exist
-	err := u.checkUser(email)
+	var args []interface{}
+
+	resp, err := validateJson(u.inputRequest, "about", "user", "name")
 	if err != nil {
-		responseCode := 1
-		errorMessage := map[string]interface{}{"msg": "Not found"}
+		return resp
+	}
 
-		response, err := createResponse(responseCode, errorMessage)
+	args = append(args, u.inputRequest.json["about"])
+	args = append(args, u.inputRequest.json["name"])
+	args = append(args, u.inputRequest.json["user"])
+
+	_, err = execQuery(query, &args, u.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
 		if err != nil {
-			panic(err.Error())
+			panic(err)
 		}
 
-		return response
+		return resp
 	}
 
-	stmtIns, err := u.db.Prepare("UPDATE user SET about = ?, name = ? WHERE email =  ?") // ? = placeholder
-	if err != nil {
-		panic(err.Error()) // proper error handling instead of panic in your app
-	}
-	defer stmtIns.Close() // Close the statement when we leave main() / the program terminates
+	u.inputRequest.query["user"] = append(u.inputRequest.query["user"], u.inputRequest.json["user"].(string))
+	resp = u.getDetails()
 
-	// about := u.inputRequest.json["about"]
-	// name := u.inputRequest.json["name"]
-	// email := u.inputRequest.json["email"]
-
-	fmt.Println("LOLCA1")
-
-	_, err = stmtIns.Exec(about, name, email)
-	fmt.Println("LOLCA2")
-
-	// insertId, err := res.LastInsertId()
-
-	// responseMsg := map[string]interface{}{
-	// 	"about":       about,
-	// 	"email":       email,
-	// 	"id":          insertId,
-	// 	"isAnonymous": isAnonymous,
-	// 	"name":        name,
-	// 	"username":    username,
-	// }
-
-	// u.userResponse.About = about
-	// u.userResponse.Name = name
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"about":       u.userResponse.About,
-		"email":       u.userResponse.Email,
-		"id":          u.userResponse.Id,
-		"isAnonymous": u.userResponse.IsAnonymous,
-		"name":        u.userResponse.Name,
-		"username":    u.userResponse.Username,
-	}
-
-	response, err := createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	fmt.Println("user.updateProfile()")
-
-	return response
+	return resp
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
