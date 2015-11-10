@@ -144,6 +144,8 @@ func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, er
 	if err != nil {
 		return nil, err
 	}
+	defer stmt.Close()
+
 	res, err := stmt.Exec(*args...)
 	if err != nil {
 		return nil, err
@@ -248,15 +250,6 @@ func selectQuery(query string, args *[]interface{}, db *sql.DB) (*SelectResponse
 type User struct {
 	inputRequest *InputRequest
 	db           *sql.DB
-	userResponse struct {
-		Id          int    `json:"id"`
-		Username    string `json:"username"`
-		About       string `json:"about"`
-		Name        string `json:"name"`
-		Email       string `json:"email"`
-		IsAnonymous bool   `json:"isAnonymous"`
-		Date        string `json:"date"`
-	}
 }
 
 func (u *User) create() string {
@@ -329,13 +322,7 @@ func (u *User) create() string {
 	return resp
 }
 
-func (u *User) getDetails() string {
-	var resp string
-	if len(u.inputRequest.query["user"]) != 1 {
-		resp = createIvalidResponse()
-		return resp
-	}
-
+func (u *User) getUserDetails() (int, map[string]interface{}) {
 	query := "SELECT * FROM user WHERE email = ?"
 	var args []interface{}
 	args = append(args, u.inputRequest.query["user"][0])
@@ -349,12 +336,7 @@ func (u *User) getDetails() string {
 		responseCode := 1
 		errorMessage := map[string]interface{}{"msg": "Not found"}
 
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			panic(err)
-		}
-
-		return resp
+		return responseCode, errorMessage
 	}
 
 	// followers here
@@ -395,7 +377,19 @@ func (u *User) getDetails() string {
 		"username":    getUser.values[0]["username"],
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	return responseCode, responseMsg
+}
+
+func (u *User) getDetails() string {
+	var resp string
+	if len(u.inputRequest.query["user"]) != 1 {
+		resp = createIvalidResponse()
+		return resp
+	}
+
+	responseCode, responseMsg := u.getUserDetails()
+
+	resp, err := createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -529,6 +523,155 @@ func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 	io.WriteString(w, result)
 }
 
+// =================
+// Forum handler here
+// =================
+
+type Forum struct {
+	inputRequest *InputRequest
+	db           *sql.DB
+}
+
+func (f *Forum) create() string {
+	var resp string
+	query := "INSERT INTO forum (name, short_name, user) VALUES(?, ?, ?)"
+
+	var args []interface{}
+
+	resp, err := validateJson(f.inputRequest, "name", "short_name", "user")
+	if err != nil {
+		return resp
+	}
+
+	args = append(args, f.inputRequest.json["name"])
+	args = append(args, f.inputRequest.json["short_name"])
+	args = append(args, f.inputRequest.json["user"])
+
+	dbResp, err := execQuery(query, &args, f.db)
+	if err != nil {
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	query = "SELECT * FROM forum WHERE id = ?"
+	args = args[0:0]
+	args = append(args, dbResp.lastId)
+	newForum, err := selectQuery(query, &args, f.db)
+	if err != nil {
+		panic(err)
+	}
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"name":       newForum.values[0]["name"],
+		"short_name": newForum.values[0]["short_name"],
+		"id":         dbResp.lastId,
+		"user":       newForum.values[0]["user"],
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Println("forum.create()")
+
+	return resp
+}
+
+func (f *Forum) getForumDetails() (int, map[string]interface{}) {
+	query := "SELECT * FROM forum WHERE short_name = ?"
+	var args []interface{}
+	args = append(args, f.inputRequest.query["forum"][0])
+
+	getForum, err := selectQuery(query, &args, f.db)
+	if err != nil {
+		panic(err)
+	}
+
+	if getForum.rows == 0 {
+		responseCode := 1
+		errorMessage := map[string]interface{}{"msg": "Not found"}
+
+		return responseCode, errorMessage
+	}
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"id":         getForum.values[0]["id"],
+		"short_name": getForum.values[0]["short_name"],
+		"name":       getForum.values[0]["name"],
+		"user":       getForum.values[0]["user"],
+	}
+
+	return responseCode, responseMsg
+}
+
+func (f *Forum) details() string {
+	var resp string
+	var related bool
+	if len(f.inputRequest.query["forum"]) != 1 {
+		resp = createIvalidResponse()
+		return resp
+	}
+
+	if len(f.inputRequest.query["related"]) == 1 && f.inputRequest.query["related"][0] == "user" {
+		related = true
+	}
+
+	responseCode, responseMsg := f.getForumDetails()
+
+	if related {
+		u := User{inputRequest: f.inputRequest, db: f.db}
+		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], "sasha@localhost")
+		_, userDetails := u.getUserDetails()
+
+		responseMsg["user"] = userDetails
+	}
+
+	resp, err := createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
+}
+
+func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	forum := Forum{inputRequest: inputRequest, db: db}
+
+	var result string
+
+	if inputRequest.method == "GET" {
+		result = forum.details()
+	} else if inputRequest.method == "POST" {
+
+		// Like Router
+		if inputRequest.path == "/db/api/forum/create/" {
+			result = forum.create()
+		}
+		// else if inputRequest.path == "/db/api/user/follow/" {
+		// 	result = user.follow()
+		// } else if inputRequest.path == "/db/api/user/unfollow/" {
+		// 	result = user.unfollow()
+		// } else if inputRequest.path == "/db/api/user/updateProfile/" {
+		// 	result = user.updateProfile()
+		// }
+	}
+
+	io.WriteString(w, result)
+}
+
+// =================
+// Main here
+// =================
+
 func makeHandler(db *sql.DB, fn func(http.ResponseWriter, *http.Request, *InputRequest, *sql.DB)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		inputRequest := new(InputRequest)
@@ -553,33 +696,12 @@ func main() {
 		panic(err.Error())
 	}
 
-	/*
-		stmtOut, err := db.Prepare("SELECT name FROM user WHERE id > ?")
-		if err != nil {
-			panic(err.Error()) // proper error handling instead of panic in your app
-		}
-		defer stmtOut.Close()
-
-		var squareNum string
-
-		for i := 0; i < 1; i++ {
-			fmt.Println("1")
-			// Query the square-number of 13
-			err = stmtOut.QueryRow("'SELECT").Scan(&squareNum) // WHERE number = 13
-			fmt.Println("2")
-			if err != nil {
-				panic(err.Error()) // proper error handling instead of panic in your app
-			}
-			fmt.Println("3")
-			fmt.Printf("The square number of 13 is: %v\n", squareNum)
-		}
-	*/
-
 	PORT := ":8000"
 
 	fmt.Printf("The server is running on http://localhost%s\n", PORT)
 
 	http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
+	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
 
 	http.ListenAndServe(PORT, nil)
 
