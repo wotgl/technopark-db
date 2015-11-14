@@ -630,21 +630,21 @@ func (f *Forum) getForumDetails() (int, map[string]interface{}) {
 
 func (f *Forum) details() string {
 	var resp string
-	var related bool
+	var relatedUser bool
 	if len(f.inputRequest.query["forum"]) != 1 {
 		resp = createInvalidResponse()
 		return resp
 	}
 
 	if len(f.inputRequest.query["related"]) == 1 && f.inputRequest.query["related"][0] == "user" {
-		related = true
+		relatedUser = true
 	}
 
 	responseCode, responseMsg := f.getForumDetails()
 
-	if related {
+	if relatedUser {
 		u := User{inputRequest: f.inputRequest, db: f.db}
-		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], "sasha@localhost")
+		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], responseMsg["user"].(string))
 		_, userDetails := u.getUserDetails()
 
 		responseMsg["user"] = userDetails
@@ -690,6 +690,69 @@ func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputReq
 type Thread struct {
 	inputRequest *InputRequest
 	db           *sql.DB
+}
+
+func (t *Thread) close() string {
+	var resp string
+	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
+
+	var args []interface{}
+
+	resp, err := validateJson(t.inputRequest, "thread")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	threadId := t.inputRequest.json["thread"].(float64)
+
+	args = append(args, true)
+	args = append(args, t.inputRequest.json["thread"])
+
+	dbResp, err := execQuery(query, &args, t.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	if dbResp.rowCount == 0 {
+		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
+		responseCode, responseMsg := t.getThreadDetails()
+
+		if responseCode != 0 {
+			resp = createNotExistResponse()
+			return resp
+		}
+
+		resp, err = createResponse(responseCode, responseMsg)
+		if err != nil {
+			panic(err.Error())
+		}
+		return resp
+	}
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"thread": threadId,
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
 }
 
 func (t *Thread) create() string {
@@ -815,90 +878,39 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 
 func (t *Thread) details() string {
 	var resp string
-	var relatedUser bool
+	var relatedUser, relatedForum bool
 	if len(t.inputRequest.query["thread"]) != 1 {
 		resp = createInvalidResponse()
 		return resp
 	}
 
-	if len(t.inputRequest.query["related"]) == 1 && t.inputRequest.query["related"][0] == "user" {
+	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("user", t.inputRequest.query["related"]) {
 		relatedUser = true
+	}
+	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("forum", t.inputRequest.query["related"]) {
+		relatedForum = true
 	}
 
 	responseCode, responseMsg := t.getThreadDetails()
 
 	if relatedUser {
 		u := User{inputRequest: t.inputRequest, db: t.db}
-		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], "sasha@localhost")
+		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], responseMsg["user"].(string))
 		_, userDetails := u.getUserDetails()
 
 		responseMsg["user"] = userDetails
 	}
 
+	if relatedForum {
+		f := Forum{inputRequest: t.inputRequest, db: t.db}
+		f.inputRequest.query["user"] = f.inputRequest.query["user"][:0]
+		f.inputRequest.query["forum"] = append(f.inputRequest.query["forum"], responseMsg["forum"].(string))
+		_, forumDetails := f.getForumDetails()
+
+		responseMsg["forum"] = forumDetails
+	}
+
 	resp, err := createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return resp
-}
-
-func (t *Thread) close() string {
-	var resp string
-	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
-
-	var args []interface{}
-
-	resp, err := validateJson(t.inputRequest, "thread")
-	if err != nil {
-		return resp
-	}
-
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
-	}
-
-	threadId := t.inputRequest.json["thread"].(float64)
-
-	args = append(args, true)
-	args = append(args, t.inputRequest.json["thread"])
-
-	dbResp, err := execQuery(query, &args, t.db)
-	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			panic(err)
-		}
-
-		return resp
-	}
-
-	if dbResp.rowCount == 0 {
-		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-		responseCode, responseMsg := t.getThreadDetails()
-
-		if responseCode != 0 {
-			resp = createNotExistResponse()
-			return resp
-		}
-
-		resp, err = createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return resp
-	}
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
-	}
-
-	resp, err = createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -966,64 +978,6 @@ func (t *Thread) open() string {
 		panic(err.Error())
 	}
 
-	return resp
-}
-
-func (t *Thread) vote() string {
-	var resp string
-	var query string
-
-	var args []interface{}
-
-	resp, err := validateJson(t.inputRequest, "thread", "vote")
-	if err != nil {
-		return resp
-	}
-
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false || checkFloat64Type(t.inputRequest.json["vote"]) == false {
-		resp = createInvalidResponse()
-		return resp
-	}
-
-	threadId := t.inputRequest.json["thread"].(float64)
-	vote := t.inputRequest.json["vote"].(float64)
-
-	if vote == 1 {
-		query = "UPDATE thread SET likes = likes + 1 WHERE id = ?"
-	} else if vote == -1 {
-		query = "UPDATE thread SET dislikes = dislikes + 1 WHERE id = ?"
-	} else {
-		resp = createInvalidResponse()
-		return resp
-	}
-
-	args = append(args, t.inputRequest.json["thread"])
-
-	_, err = execQuery(query, &args, t.db)
-	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			panic(err)
-		}
-
-		return resp
-	}
-
-	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-	responseCode, responseMsg := t.getThreadDetails()
-
-	if responseCode != 0 {
-		resp = createNotExistResponse()
-		return resp
-	}
-
-	resp, err = createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
 	return resp
 }
 
@@ -1153,6 +1107,114 @@ func (t *Thread) restore() string {
 	return resp
 }
 
+func (t *Thread) update() string {
+	var resp string
+	query := "UPDATE thread SET message = ?, slug = ? WHERE id = ?"
+
+	var args []interface{}
+
+	resp, err := validateJson(t.inputRequest, "thread", "message", "slug")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	threadId := t.inputRequest.json["thread"].(float64)
+
+	args = append(args, t.inputRequest.json["message"])
+	args = append(args, t.inputRequest.json["slug"])
+	args = append(args, t.inputRequest.json["thread"])
+
+	_, err = execQuery(query, &args, t.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
+	responseCode, responseMsg := t.getThreadDetails()
+
+	if responseCode != 0 {
+		resp = createNotExistResponse()
+		return resp
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+	return resp
+}
+
+func (t *Thread) vote() string {
+	var resp string
+	var query string
+
+	var args []interface{}
+
+	resp, err := validateJson(t.inputRequest, "thread", "vote")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(t.inputRequest.json["thread"]) == false || checkFloat64Type(t.inputRequest.json["vote"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	threadId := t.inputRequest.json["thread"].(float64)
+	vote := t.inputRequest.json["vote"].(float64)
+
+	if vote == 1 {
+		query = "UPDATE thread SET likes = likes + 1 WHERE id = ?"
+	} else if vote == -1 {
+		query = "UPDATE thread SET dislikes = dislikes + 1 WHERE id = ?"
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	args = append(args, t.inputRequest.json["thread"])
+
+	_, err = execQuery(query, &args, t.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
+	responseCode, responseMsg := t.getThreadDetails()
+
+	if responseCode != 0 {
+		resp = createNotExistResponse()
+		return resp
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+	return resp
+}
+
 func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	thread := Thread{inputRequest: inputRequest, db: db}
 
@@ -1175,6 +1237,8 @@ func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 			result = thread.remove()
 		} else if inputRequest.path == "/db/api/thread/open/" {
 			result = thread.open()
+		} else if inputRequest.path == "/db/api/thread/update/" {
+			result = thread.update()
 		}
 		// else if inputRequest.path == "/db/api/user/unfollow/" {
 		// 	result = user.unfollow()
@@ -1244,4 +1308,13 @@ func checkFloat64Type(inputNum interface{}) bool {
 		return false
 	}
 	return true
+}
+
+func stringInSlice(a string, list []string) bool {
+	for _, b := range list {
+		if b == a {
+			return true
+		}
+	}
+	return false
 }
