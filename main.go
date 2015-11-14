@@ -84,6 +84,15 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 	panic(err.Error()) // proper error handling instead of panic in your app
 }
 
+func checkError1062(err error) bool {
+	if driverErr, ok := err.(*mysql.MySQLError); ok { // Now the error number is accessible directly
+		if driverErr.Number == 1062 {
+			return true
+		}
+	}
+	return false
+}
+
 func createInvalidResponse() string {
 	responseCode := 2
 	errorMessage := map[string]interface{}{"msg": "Invalid"}
@@ -429,6 +438,16 @@ func (u *User) follow() string {
 	_, err = execQuery(query, &args, u.db)
 	if err != nil {
 		fmt.Println(err)
+		// return exist
+		if checkError1062(err) == true {
+			for k := range u.inputRequest.query {
+				delete(u.inputRequest.query, k)
+			}
+			u.inputRequest.query["user"] = append(u.inputRequest.query["user"], u.inputRequest.json["follower"].(string))
+
+			resp = u.getDetails()
+			return resp
+		}
 		responseCode, errorMessage := errorExecParse(err)
 
 		resp, err = createResponse(responseCode, errorMessage)
@@ -1107,6 +1126,124 @@ func (t *Thread) restore() string {
 	return resp
 }
 
+func (t *Thread) subscribe() string {
+	var resp string
+	query := "INSERT INTO subscribe (thread, user) VALUES(?, ?)"
+
+	var args []interface{}
+
+	resp, err := validateJson(t.inputRequest, "thread", "user")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	args = append(args, t.inputRequest.json["thread"])
+	args = append(args, t.inputRequest.json["user"])
+
+	_, err = execQuery(query, &args, t.db)
+	if err != nil {
+		fmt.Println(err)
+
+		// return exist
+		if checkError1062(err) == true {
+			for k := range t.inputRequest.query {
+				delete(t.inputRequest.query, k)
+			}
+			t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], floatToString(t.inputRequest.json["thread"].(float64)))
+
+			resp = t.details()
+			return resp
+		}
+
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	// else return info
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"thread": int(t.inputRequest.json["thread"].(float64)),
+		"user":   t.inputRequest.json["user"],
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Println("thread.subscribe()")
+
+	return resp
+}
+
+func (t *Thread) unsubscribe() string {
+	var resp string
+	query := "DELETE FROM subscribe WHERE thread = ? AND user = ?"
+
+	var args []interface{}
+
+	resp, err := validateJson(t.inputRequest, "thread", "user")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	args = append(args, t.inputRequest.json["thread"])
+	args = append(args, t.inputRequest.json["user"])
+
+	dbResp, err := execQuery(query, &args, t.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	if dbResp.rowCount == 0 {
+		for k := range t.inputRequest.query {
+			delete(t.inputRequest.query, k)
+		}
+		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], floatToString(t.inputRequest.json["thread"].(float64)))
+
+		resp = t.details()
+		return resp
+	}
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"thread": int(t.inputRequest.json["thread"].(float64)),
+		"user":   t.inputRequest.json["user"],
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
+}
+
 func (t *Thread) update() string {
 	var resp string
 	query := "UPDATE thread SET message = ?, slug = ? WHERE id = ?"
@@ -1239,6 +1376,10 @@ func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 			result = thread.open()
 		} else if inputRequest.path == "/db/api/thread/update/" {
 			result = thread.update()
+		} else if inputRequest.path == "/db/api/thread/subscribe/" {
+			result = thread.subscribe()
+		} else if inputRequest.path == "/db/api/thread/unsubscribe/" {
+			result = thread.unsubscribe()
 		}
 		// else if inputRequest.path == "/db/api/user/unfollow/" {
 		// 	result = user.unfollow()
