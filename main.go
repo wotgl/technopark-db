@@ -57,6 +57,21 @@ func createResponse(code int, response map[string]interface{}) (string, error) {
 	return string(str), nil
 }
 
+func createResponseFromArray(code int, response []map[string]interface{}) (string, error) {
+	cacheContent := map[string]interface{}{
+		"code":     code,
+		"response": response,
+	}
+
+	str, err := json.Marshal(cacheContent)
+	if err != nil {
+		fmt.Println("Error encoding JSON")
+		return "", err
+	}
+
+	return string(str), nil
+}
+
 func errorExecParse(err error) (int, map[string]interface{}) {
 	if driverErr, ok := err.(*mysql.MySQLError); ok { // Now the error number is accessible directly
 		var responseCode int
@@ -895,6 +910,87 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 	return responseCode, responseMsg
 }
 
+func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []interface{}) {
+	fmt.Println("Query:\t", query)
+	fmt.Println("Args:\t", args)
+
+	getThread, err := selectQuery(query, &args, t.db)
+	if err != nil {
+		panic(err)
+	}
+
+	if getThread.rows == 0 {
+		responseCode := 1
+		errorMessage := map[string]interface{}{"msg": "Not found"}
+
+		fmt.Println(responseCode, errorMessage)
+		// return responseCode, errorMessage
+	}
+
+	type ResponseArrayThreadsDetails interface {
+		date      string `json:"date"`
+		dislikes  int64  `json:"dislikes"`
+		forum     string `json:"forum"`
+		id        int64  `json:"id"`
+		isClosed  bool   `json:"isClosed"`
+		isDeleted bool   `json:"isDeleted"`
+		likes     int64  `json:"likes"`
+		message   string `json:"message"`
+		points    int    `json:"points"`
+		posts     int    `json:"posts"`
+		slug      string `json:"slug"`
+		title     string `json:"title"`
+		user      string `json:"user"`
+	}
+
+	responseCode := 0
+	// var responseMsg []map[string]interface{}
+	var responseMsg []ResponseArrayThreadsDetails
+	for _, value := range getThread.values {
+		respId, _ := strconv.ParseInt(value["id"], 10, 64)
+		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
+		respDislikes, _ := strconv.ParseInt(value["dislikes"], 10, 64)
+		respIsClosed, _ := strconv.ParseBool(value["isClosed"])
+		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
+
+		tempMsg := ResponseArrayThreadsDetails{
+			date:      value["date"],
+			dislikes:  respDislikes,
+			forum:     value["forum"],
+			id:        respId,
+			isClosed:  respIsClosed,
+			isDeleted: respIsDeleted,
+			likes:     respLikes,
+			message:   value["message"],
+			points:    0,
+			posts:     0,
+			slug:      value["slug"],
+			title:     value["title"],
+			user:      value["user"],
+		}
+
+		// tempMsg := map[string]interface{}{
+		// 	"date":      value["date"],
+		// 	"dislikes":  respDislikes,
+		// 	"forum":     value["forum"],
+		// 	"id":        respId,
+		// 	"isClosed":  respIsClosed,
+		// 	"isDeleted": respIsDeleted,
+		// 	"likes":     respLikes,
+		// 	"message":   value["message"],
+		// 	"points":    0,
+		// 	"posts":     0,
+		// 	"slug":      value["slug"],
+		// 	"title":     value["title"],
+		// 	"user":      value["user"],
+		// }
+
+		responseMsg = append(responseMsg, tempMsg)
+	}
+
+	return responseCode, responseMsg
+}
+
 func (t *Thread) details() string {
 	var resp string
 	var relatedUser, relatedForum bool
@@ -935,6 +1031,65 @@ func (t *Thread) details() string {
 	}
 
 	return resp
+}
+
+func (t *Thread) list() string {
+	var resp, query string
+	f := false
+	var args []interface{}
+
+	// Validate query values
+	if len(t.inputRequest.query["user"]) == 1 {
+		query = "SELECT * FROM thread WHERE user = ?"
+		args = append(args, t.inputRequest.query["user"][0])
+
+		f = true
+	}
+	if len(t.inputRequest.query["forum"]) == 1 && f == false {
+		query = "SELECT * FROM thread WHERE forum = ?"
+		args = append(args, t.inputRequest.query["forum"][0])
+
+		f = true
+	}
+	if f == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// Check and validate optional params
+	if len(t.inputRequest.query["since"]) >= 1 {
+		query += " AND date > ?"
+		args = append(args, t.inputRequest.query["since"][0])
+	}
+	if len(t.inputRequest.query["order"]) >= 1 {
+		orderType := t.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
+			resp = createInvalidResponse()
+			return resp
+		}
+
+		query += fmt.Sprintf(" ORDER BY date %s", orderType)
+	}
+	if len(t.inputRequest.query["limit"]) >= 1 {
+		limitValue := t.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			resp = createInvalidResponse()
+			return resp
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	// Response here
+	responseCode, responseMsg := t.getArrayThreadsDetails(query, args)
+	resp, err := createResponseFromArray(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
+
+	return "LOL"
 }
 
 func (t *Thread) open() string {
@@ -1358,7 +1513,13 @@ func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 	var result string
 
 	if inputRequest.method == "GET" {
-		result = thread.details()
+
+		// Like Router
+		if inputRequest.path == "/db/api/thread/details/" {
+			result = thread.details()
+		} else if inputRequest.path == "/db/api/thread/list/" {
+			result = thread.list()
+		}
 	} else if inputRequest.method == "POST" {
 
 		// Like Router
