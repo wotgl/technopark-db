@@ -924,21 +924,17 @@ func testArrayJson(code int, response []response.Foo) string {
 	return string(result)
 }
 
-func testJson(code int, response response.Foo) (string, error) {
+func testJson(code int, response response.Foo) string {
 	cacheContent := map[string]interface{}{
 		"code":     code,
 		"response": response,
 	}
-	result, err := json.Marshal(cacheContent)
-	if err != nil {
-		fmt.Println("Error encoding JSON")
-		return "", err
-	}
+	result, _ := json.Marshal(cacheContent)
 
-	return string(result), nil
+	return string(result)
 }
 
-func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []response.Foo) {
+func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []map[string]interface{}) {
 
 	getThread, err := selectQuery(query, &args, t.db)
 	if err != nil {
@@ -946,19 +942,19 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 	}
 
 	if getThread.rows == 0 {
-		var responseMsg []response.Foo
+		var responseMsg []map[string]interface{}
 		responseCode := 1
-		errorMessage := &response.ErrorMessage{
-			Msg: "Not found",
+		errorMessage := map[string]interface{}{
+			"msg": "Not found",
 		}
-		responseMsg = append(responseMsg, *errorMessage)
+		responseMsg = append(responseMsg, errorMessage)
 
 		// fmt.Println(responseCode, errorMessage)
 		return responseCode, responseMsg
 	}
 
 	responseCode := 0
-	var responseMsg []response.Foo
+	var responseMsg []map[string]interface{}
 
 	for _, value := range getThread.values {
 		respId, _ := strconv.ParseInt(value["id"], 10, 64)
@@ -967,23 +963,23 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 		respIsClosed, _ := strconv.ParseBool(value["isClosed"])
 		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
 
-		tempMsg := &response.ArrayThreadsDetails{
-			Date:      value["date"],
-			Dislikes:  respDislikes,
-			Forum:     value["forum"],
-			Id:        respId,
-			IsClosed:  respIsClosed,
-			IsDeleted: respIsDeleted,
-			Likes:     respLikes,
-			Message:   value["message"],
-			Points:    0,
-			Posts:     0,
-			Slug:      value["slug"],
-			Title:     value["title"],
-			User:      value["user"],
+		tempMsg := map[string]interface{}{
+			"date":      value["date"],
+			"dislikes":  respDislikes,
+			"forum":     value["forum"],
+			"id":        respId,
+			"isClosed":  respIsClosed,
+			"isDeleted": respIsDeleted,
+			"likes":     respLikes,
+			"message":   value["message"],
+			"points":    0,
+			"posts":     0,
+			"slug":      value["slug"],
+			"title":     value["title"],
+			"user":      value["user"],
 		}
 
-		responseMsg = append(responseMsg, *tempMsg)
+		responseMsg = append(responseMsg, tempMsg)
 	}
 
 	return responseCode, responseMsg
@@ -1083,11 +1079,13 @@ func (t *Thread) list() string {
 	// Response here
 	responseCode, responseMsg := t.getArrayThreadsDetails(query, args)
 	if responseCode != 0 {
-		resp, _ = testJson(responseCode, responseMsg[0])
+		resp, _ = createResponse(responseCode, responseMsg[0])
 		return resp
 	}
-
-	resp = testArrayJson(responseCode, responseMsg)
+	resp, err := createResponseFromArray(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
 
 	return resp
 }
@@ -1143,18 +1141,14 @@ func (t *Thread) open() string {
 	}
 
 	responseCode := 0
-	responseMsg := &response.Open{
-		Thread: threadId,
+	responseMsg := map[string]interface{}{
+		"thread": threadId,
 	}
 
-	resp, err = testJson(responseCode, responseMsg)
+	resp, err = createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
-	// resp, err = createResponse(responseCode, responseMsg)
-	// if err != nil {
-	// 	panic(err.Error())
-	// }
 
 	return resp
 }
@@ -1210,11 +1204,11 @@ func (t *Thread) remove() string {
 	}
 
 	responseCode := 0
-	responseMsg := &response.Remove{
-		Thread: threadId,
+	responseMsg := map[string]interface{}{
+		"thread": threadId,
 	}
 
-	resp, err = testJson(responseCode, responseMsg)
+	resp, err = createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
