@@ -12,6 +12,8 @@ import (
 	"reflect"
 	"strconv"
 
+	response "technopark-db/response"
+
 	mysql "github.com/go-sql-driver/mysql"
 )
 
@@ -910,9 +912,33 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 	return responseCode, responseMsg
 }
 
-func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []interface{}) {
-	fmt.Println("Query:\t", query)
-	fmt.Println("Args:\t", args)
+// ===================================================
+
+func testArrayJson(code int, response []response.Foo) string {
+	cacheContent := map[string]interface{}{
+		"code":     code,
+		"response": response,
+	}
+	result, _ := json.Marshal(cacheContent)
+
+	return string(result)
+}
+
+func testJson(code int, response response.Foo) (string, error) {
+	cacheContent := map[string]interface{}{
+		"code":     code,
+		"response": response,
+	}
+	result, err := json.Marshal(cacheContent)
+	if err != nil {
+		fmt.Println("Error encoding JSON")
+		return "", err
+	}
+
+	return string(result), nil
+}
+
+func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []response.Foo) {
 
 	getThread, err := selectQuery(query, &args, t.db)
 	if err != nil {
@@ -920,32 +946,20 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 	}
 
 	if getThread.rows == 0 {
+		var responseMsg []response.Foo
 		responseCode := 1
-		errorMessage := map[string]interface{}{"msg": "Not found"}
+		errorMessage := &response.ErrorMessage{
+			Msg: "Not found",
+		}
+		responseMsg = append(responseMsg, *errorMessage)
 
-		fmt.Println(responseCode, errorMessage)
-		// return responseCode, errorMessage
-	}
-
-	type ResponseArrayThreadsDetails interface {
-		date      string `json:"date"`
-		dislikes  int64  `json:"dislikes"`
-		forum     string `json:"forum"`
-		id        int64  `json:"id"`
-		isClosed  bool   `json:"isClosed"`
-		isDeleted bool   `json:"isDeleted"`
-		likes     int64  `json:"likes"`
-		message   string `json:"message"`
-		points    int    `json:"points"`
-		posts     int    `json:"posts"`
-		slug      string `json:"slug"`
-		title     string `json:"title"`
-		user      string `json:"user"`
+		// fmt.Println(responseCode, errorMessage)
+		return responseCode, responseMsg
 	}
 
 	responseCode := 0
-	// var responseMsg []map[string]interface{}
-	var responseMsg []ResponseArrayThreadsDetails
+	var responseMsg []response.Foo
+
 	for _, value := range getThread.values {
 		respId, _ := strconv.ParseInt(value["id"], 10, 64)
 		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
@@ -953,43 +967,29 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 		respIsClosed, _ := strconv.ParseBool(value["isClosed"])
 		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
 
-		tempMsg := ResponseArrayThreadsDetails{
-			date:      value["date"],
-			dislikes:  respDislikes,
-			forum:     value["forum"],
-			id:        respId,
-			isClosed:  respIsClosed,
-			isDeleted: respIsDeleted,
-			likes:     respLikes,
-			message:   value["message"],
-			points:    0,
-			posts:     0,
-			slug:      value["slug"],
-			title:     value["title"],
-			user:      value["user"],
+		tempMsg := &response.ArrayThreadsDetails{
+			Date:      value["date"],
+			Dislikes:  respDislikes,
+			Forum:     value["forum"],
+			Id:        respId,
+			IsClosed:  respIsClosed,
+			IsDeleted: respIsDeleted,
+			Likes:     respLikes,
+			Message:   value["message"],
+			Points:    0,
+			Posts:     0,
+			Slug:      value["slug"],
+			Title:     value["title"],
+			User:      value["user"],
 		}
 
-		// tempMsg := map[string]interface{}{
-		// 	"date":      value["date"],
-		// 	"dislikes":  respDislikes,
-		// 	"forum":     value["forum"],
-		// 	"id":        respId,
-		// 	"isClosed":  respIsClosed,
-		// 	"isDeleted": respIsDeleted,
-		// 	"likes":     respLikes,
-		// 	"message":   value["message"],
-		// 	"points":    0,
-		// 	"posts":     0,
-		// 	"slug":      value["slug"],
-		// 	"title":     value["title"],
-		// 	"user":      value["user"],
-		// }
-
-		responseMsg = append(responseMsg, tempMsg)
+		responseMsg = append(responseMsg, *tempMsg)
 	}
 
 	return responseCode, responseMsg
 }
+
+// ========================================================
 
 func (t *Thread) details() string {
 	var resp string
@@ -1082,14 +1082,14 @@ func (t *Thread) list() string {
 
 	// Response here
 	responseCode, responseMsg := t.getArrayThreadsDetails(query, args)
-	resp, err := createResponseFromArray(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
+	if responseCode != 0 {
+		resp, _ = testJson(responseCode, responseMsg[0])
+		return resp
 	}
 
-	return resp
+	resp = testArrayJson(responseCode, responseMsg)
 
-	return "LOL"
+	return resp
 }
 
 func (t *Thread) open() string {
@@ -1143,14 +1143,18 @@ func (t *Thread) open() string {
 	}
 
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
+	responseMsg := &response.Open{
+		Thread: threadId,
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = testJson(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
+	// resp, err = createResponse(responseCode, responseMsg)
+	// if err != nil {
+	// 	panic(err.Error())
+	// }
 
 	return resp
 }
@@ -1206,11 +1210,11 @@ func (t *Thread) remove() string {
 	}
 
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
+	responseMsg := &response.Remove{
+		Thread: threadId,
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = testJson(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
