@@ -11,8 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
-
-	response "technopark-db/response"
+	"technopark-db/response"
 
 	mysql "github.com/go-sql-driver/mysql"
 )
@@ -378,7 +377,39 @@ func (u *User) getUserDetails() (int, map[string]interface{}) {
 	}
 
 	// followers here
-	query = "SELECT follower FROM follow WHERE followee = ?"
+	listFollowers := u.getUserFollowers(args[0].(string))
+
+	// following here
+	listFollowing := u.getUserFollowing(args[0].(string))
+
+	// subscriptions here
+	listSubscriptions := u.getUserSubscriptions(args[0].(string))
+
+	respIsAnonymous, _ := strconv.ParseBool(getUser.values[0]["isAnonymous"])
+	respId, _ := strconv.ParseInt(getUser.values[0]["id"], 10, 64)
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"about":         getUser.values[0]["about"],
+		"email":         getUser.values[0]["email"],
+		"followers":     listFollowers,
+		"following":     listFollowing,
+		"id":            respId,
+		"isAnonymous":   respIsAnonymous,
+		"name":          getUser.values[0]["name"],
+		"subscriptions": listSubscriptions,
+		"username":      getUser.values[0]["username"],
+	}
+
+	return responseCode, responseMsg
+}
+
+func (u *User) getUserFollowers(followee string) []string {
+	var args []interface{}
+	args = append(args, followee)
+
+	// followers here
+	query := "SELECT follower FROM follow WHERE followee = ?"
 	getUserFollowers, err := selectQuery(query, &args, u.db)
 	if err != nil {
 		panic(err)
@@ -389,8 +420,15 @@ func (u *User) getUserDetails() (int, map[string]interface{}) {
 		listFollowers = append(listFollowers, value["follower"])
 	}
 
+	return listFollowers
+}
+
+func (u *User) getUserFollowing(follower string) []string {
+	var args []interface{}
+	args = append(args, follower)
+
 	// following here
-	query = "SELECT followee FROM follow WHERE follower = ?"
+	query := "SELECT followee FROM follow WHERE follower = ?"
 	getUserFollowing, err := selectQuery(query, &args, u.db)
 	if err != nil {
 		panic(err)
@@ -401,22 +439,26 @@ func (u *User) getUserDetails() (int, map[string]interface{}) {
 		listFollowing = append(listFollowing, value["followee"])
 	}
 
-	respIsAnonymous, _ := strconv.ParseBool(getUser.values[0]["isAnonymous"])
-	respId, _ := strconv.ParseInt(getUser.values[0]["id"], 10, 64)
+	return listFollowing
+}
 
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"about":       getUser.values[0]["about"],
-		"email":       getUser.values[0]["email"],
-		"followers":   listFollowers,
-		"following":   listFollowing,
-		"id":          respId,
-		"isAnonymous": respIsAnonymous,
-		"name":        getUser.values[0]["name"],
-		"username":    getUser.values[0]["username"],
+func (u *User) getUserSubscriptions(user string) []int {
+	var args []interface{}
+	args = append(args, user)
+
+	// subscriptions here
+	query := "SELECT thread FROM subscribe WHERE user = ? ORDER BY thread asc"
+	getUserSubscriptions, err := selectQuery(query, &args, u.db)
+	if err != nil {
+		panic(err)
 	}
 
-	return responseCode, responseMsg
+	listSubscriptions := make([]int, 0)
+	for _, value := range getUserSubscriptions.values {
+		listSubscriptions = append(listSubscriptions, stringToInt(value["thread"]))
+	}
+
+	return listSubscriptions
 }
 
 func (u *User) getDetails() string {
@@ -478,6 +520,100 @@ func (u *User) follow() string {
 	u.inputRequest.query["user"] = append(u.inputRequest.query["user"], u.inputRequest.json["follower"].(string))
 	resp = u.getDetails()
 
+	return resp
+}
+
+func (u *User) listBasic(query string) string {
+	var resp string
+	var args []interface{}
+
+	// Validate query values
+	if len(u.inputRequest.query["user"]) == 1 {
+		args = append(args, u.inputRequest.query["user"][0])
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// Check and validate optional params
+	if len(u.inputRequest.query["since_id"]) >= 1 {
+		query += " AND id >= ?"
+		args = append(args, u.inputRequest.query["since_id"][0])
+	}
+	if len(u.inputRequest.query["order"]) >= 1 {
+		orderType := u.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
+			resp = createInvalidResponse()
+			return resp
+		}
+
+		query += fmt.Sprintf(" ORDER BY date %s", orderType)
+	}
+	if len(u.inputRequest.query["limit"]) >= 1 {
+		limitValue := u.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			resp = createInvalidResponse()
+			return resp
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	// Prepare users
+	getUserFollowers, err := selectQuery(query, &args, u.db)
+	if err != nil {
+		panic(err)
+	}
+
+	responseCode := 0
+	var responseMsg []map[string]interface{}
+	for _, value := range getUserFollowers.values {
+		respIsAnonymous, _ := strconv.ParseBool(value["isAnonymous"])
+		respId, _ := strconv.ParseInt(value["id"], 10, 64)
+
+		// followers here
+		listFollowers := u.getUserFollowers(value["email"])
+
+		// following here
+		listFollowing := u.getUserFollowing(value["email"])
+
+		// subscriptions here
+		listSubscriptions := u.getUserSubscriptions(value["email"])
+
+		tempMsg := map[string]interface{}{
+			"about":         value["about"],
+			"email":         value["email"],
+			"followers":     listFollowers,
+			"following":     listFollowing,
+			"id":            respId,
+			"isAnonymous":   respIsAnonymous,
+			"name":          value["name"],
+			"subscriptions": listSubscriptions,
+			"username":      value["username"],
+		}
+
+		responseMsg = append(responseMsg, tempMsg)
+	}
+
+	resp, err = createResponseFromArray(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
+}
+
+func (u *User) listFollowers() string {
+	query := "SELECT u.* FROM user u JOIN follow f ON u.email = f.follower WHERE followee = ?"
+
+	resp := u.listBasic(query)
+	return resp
+}
+
+func (u *User) listFollowing() string {
+	query := "SELECT u.* FROM user u JOIN follow f ON u.email = f.followee WHERE follower = ?"
+
+	resp := u.listBasic(query)
 	return resp
 }
 
@@ -554,7 +690,13 @@ func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 	var result string
 
 	if inputRequest.method == "GET" {
-		result = user.getDetails()
+		if inputRequest.path == "/db/api/user/details/" {
+			result = user.getDetails()
+		} else if inputRequest.path == "/db/api/user/listFollowers/" {
+			result = user.listFollowers()
+		} else if inputRequest.path == "/db/api/user/listFollowing/" {
+			result = user.listFollowing()
+		}
 	} else if inputRequest.method == "POST" {
 
 		// Like Router
@@ -694,6 +836,12 @@ func (f *Forum) details() string {
 	return resp
 }
 
+// DO IT
+func (f *Forum) listThreads() string {
+
+	return "DO IT"
+}
+
 func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	forum := Forum{inputRequest: inputRequest, db: db}
 
@@ -728,9 +876,8 @@ type Thread struct {
 	db           *sql.DB
 }
 
-func (t *Thread) close() string {
+func (t *Thread) boolActionBasic(query string, value bool) string {
 	var resp string
-	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
 	var args []interface{}
 
@@ -746,7 +893,7 @@ func (t *Thread) close() string {
 
 	threadId := t.inputRequest.json["thread"].(float64)
 
-	args = append(args, true)
+	args = append(args, value)
 	args = append(args, t.inputRequest.json["thread"])
 
 	dbResp, err := execQuery(query, &args, t.db)
@@ -787,6 +934,14 @@ func (t *Thread) close() string {
 	if err != nil {
 		panic(err.Error())
 	}
+
+	return resp
+}
+
+func (t *Thread) close() string {
+	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
+
+	resp := t.boolActionBasic(query, true)
 
 	return resp
 }
@@ -912,28 +1067,6 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 	return responseCode, responseMsg
 }
 
-// ===================================================
-
-func testArrayJson(code int, response []response.Foo) string {
-	cacheContent := map[string]interface{}{
-		"code":     code,
-		"response": response,
-	}
-	result, _ := json.Marshal(cacheContent)
-
-	return string(result)
-}
-
-func testJson(code int, response response.Foo) string {
-	cacheContent := map[string]interface{}{
-		"code":     code,
-		"response": response,
-	}
-	result, _ := json.Marshal(cacheContent)
-
-	return string(result)
-}
-
 func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []map[string]interface{}) {
 
 	getThread, err := selectQuery(query, &args, t.db)
@@ -984,8 +1117,6 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 
 	return responseCode, responseMsg
 }
-
-// ========================================================
 
 func (t *Thread) details() string {
 	var resp string
@@ -1090,191 +1221,32 @@ func (t *Thread) list() string {
 	return resp
 }
 
+// DO IT
+func (t *Thread) listPosts() string {
+
+	return "DO IT"
+}
+
 func (t *Thread) open() string {
-	var resp string
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
-	var args []interface{}
-
-	resp, err := validateJson(t.inputRequest, "thread")
-	if err != nil {
-		return resp
-	}
-
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
-	}
-
-	threadId := t.inputRequest.json["thread"].(float64)
-
-	args = append(args, false)
-	args = append(args, t.inputRequest.json["thread"])
-
-	dbResp, err := execQuery(query, &args, t.db)
-	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			panic(err)
-		}
-
-		return resp
-	}
-
-	if dbResp.rowCount == 0 {
-		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-		responseCode, responseMsg := t.getThreadDetails()
-
-		if responseCode != 0 {
-			resp = createNotExistResponse()
-			return resp
-		}
-
-		resp, err = createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return resp
-	}
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
-	}
-
-	resp, err = createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp := t.boolActionBasic(query, false)
 
 	return resp
 }
 
 func (t *Thread) remove() string {
-	var resp string
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
-	var args []interface{}
-
-	resp, err := validateJson(t.inputRequest, "thread")
-	if err != nil {
-		return resp
-	}
-
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
-	}
-
-	threadId := t.inputRequest.json["thread"].(float64)
-
-	args = append(args, true)
-	args = append(args, t.inputRequest.json["thread"])
-
-	dbResp, err := execQuery(query, &args, t.db)
-	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			panic(err)
-		}
-
-		return resp
-	}
-
-	if dbResp.rowCount == 0 {
-		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-		responseCode, responseMsg := t.getThreadDetails()
-
-		if responseCode != 0 {
-			resp = createNotExistResponse()
-			return resp
-		}
-
-		resp, err = createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return resp
-	}
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
-	}
-
-	resp, err = createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp := t.boolActionBasic(query, true)
 
 	return resp
 }
 
 func (t *Thread) restore() string {
-	var resp string
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
-	var args []interface{}
-
-	resp, err := validateJson(t.inputRequest, "thread")
-	if err != nil {
-		return resp
-	}
-
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
-	}
-
-	threadId := t.inputRequest.json["thread"].(float64)
-
-	args = append(args, false)
-	args = append(args, t.inputRequest.json["thread"])
-
-	dbResp, err := execQuery(query, &args, t.db)
-	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			panic(err)
-		}
-
-		return resp
-	}
-
-	if dbResp.rowCount == 0 {
-		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-		responseCode, responseMsg := t.getThreadDetails()
-
-		if responseCode != 0 {
-			resp = createNotExistResponse()
-			return resp
-		}
-
-		resp, err = createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return resp
-	}
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
-	}
-
-	resp, err = createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp := t.boolActionBasic(query, false)
 
 	return resp
 }
@@ -1551,6 +1523,87 @@ func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 }
 
 // =================
+// Post handler here
+// =================
+type Post struct {
+	inputRequest *InputRequest
+	db           *sql.DB
+}
+
+// DO IT
+func (p *Post) create() string {
+
+	return "DO IT"
+}
+
+// DO IT
+func (p *Post) details() string {
+
+	return "DO IT"
+}
+
+// DO IT
+func (p *Post) list() string {
+
+	return "DO IT"
+}
+
+// DO IT
+func (p *Post) remove() string {
+
+	return "DO IT"
+}
+
+// DO IT
+func (p *Post) restore() string {
+
+	return "DO IT"
+}
+
+// DO IT
+func (p *Post) update() string {
+
+	return "DO IT"
+}
+
+// DO IT
+func (p *Post) vote() string {
+
+	return "DO IT"
+}
+
+func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	post := Post{inputRequest: inputRequest, db: db}
+
+	var result string
+
+	if inputRequest.method == "GET" {
+		// Like Router
+		if inputRequest.path == "/db/api/post/details/" {
+			result = post.details()
+		} else if inputRequest.path == "/db/api/post/list/" {
+			result = post.list()
+		}
+	} else if inputRequest.method == "POST" {
+
+		// Like Router
+		if inputRequest.path == "/db/api/post/create/" {
+			result = post.create()
+		} else if inputRequest.path == "/db/api/post/restore/" {
+			result = post.restore()
+		} else if inputRequest.path == "/db/api/post/vote/" {
+			result = post.vote()
+		} else if inputRequest.path == "/db/api/post/remove/" {
+			result = post.remove()
+		} else if inputRequest.path == "/db/api/post/update/" {
+			result = post.update()
+		}
+	}
+
+	io.WriteString(w, result)
+}
+
+// =================
 // Main here
 // =================
 
@@ -1564,7 +1617,6 @@ func makeHandler(db *sql.DB, fn func(http.ResponseWriter, *http.Request, *InputR
 }
 
 func main() {
-
 	db, err := sql.Open("mysql", "sasha1003:10031995@/mydb")
 
 	if err != nil {
@@ -1585,6 +1637,7 @@ func main() {
 	http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
 	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
 	http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
+	http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
 
 	http.ListenAndServe(PORT, nil)
 }
@@ -1617,4 +1670,36 @@ func stringInSlice(a string, list []string) bool {
 		}
 	}
 	return false
+}
+
+func stringToInt(inputStr string) int {
+	result, err := strconv.Atoi(inputStr)
+	if err != nil {
+		panic(err)
+	}
+	return result
+}
+
+// =================
+// Future here
+// =================
+
+func testArrayJson(code int, response []response.Foo) string {
+	cacheContent := map[string]interface{}{
+		"code":     code,
+		"response": response,
+	}
+	result, _ := json.Marshal(cacheContent)
+
+	return string(result)
+}
+
+func testJson(code int, response response.Foo) string {
+	cacheContent := map[string]interface{}{
+		"code":     code,
+		"response": response,
+	}
+	result, _ := json.Marshal(cacheContent)
+
+	return string(result)
 }
