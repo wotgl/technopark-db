@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"technopark-db/response"
 
 	mysql "github.com/go-sql-driver/mysql"
@@ -144,6 +145,25 @@ func validateJson(ir *InputRequest, args ...string) (string, error) {
 	}
 
 	return "", nil
+}
+
+func validateBoolParams(json map[string]interface{}, args *[]interface{}, params ...string) (string, error) {
+	var resp string
+
+	for _, value := range params {
+
+		if json[value] == nil {
+			*args = append(*args, false)
+		} else {
+			if reflect.TypeOf(json[value]).Kind() != reflect.Bool {
+				resp := createInvalidResponse()
+				return resp, errors.New("Invalid json")
+			}
+			*args = append(*args, json[value])
+		}
+	}
+
+	return resp, nil
 }
 
 // ======================
@@ -876,7 +896,7 @@ type Thread struct {
 	db           *sql.DB
 }
 
-func (t *Thread) boolActionBasic(query string, value bool) string {
+func (t *Thread) updateBoolBasic(query string, value bool) string {
 	var resp string
 
 	var args []interface{}
@@ -941,7 +961,7 @@ func (t *Thread) boolActionBasic(query string, value bool) string {
 func (t *Thread) close() string {
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
-	resp := t.boolActionBasic(query, true)
+	resp := t.updateBoolBasic(query, true)
 
 	return resp
 }
@@ -1230,7 +1250,7 @@ func (t *Thread) listPosts() string {
 func (t *Thread) open() string {
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
-	resp := t.boolActionBasic(query, false)
+	resp := t.updateBoolBasic(query, false)
 
 	return resp
 }
@@ -1238,7 +1258,7 @@ func (t *Thread) open() string {
 func (t *Thread) remove() string {
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
-	resp := t.boolActionBasic(query, true)
+	resp := t.updateBoolBasic(query, true)
 
 	return resp
 }
@@ -1246,7 +1266,7 @@ func (t *Thread) remove() string {
 func (t *Thread) restore() string {
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
-	resp := t.boolActionBasic(query, false)
+	resp := t.updateBoolBasic(query, false)
 
 	return resp
 }
@@ -1532,7 +1552,128 @@ type Post struct {
 
 // DO IT
 func (p *Post) create() string {
+	var resp string
+	query := "INSERT INTO post (date, thread, message, user, forum, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
+	// 	ir.url = fmt.Sprintf("%v", r.URL)
+
+	var args []interface{}
+
+	resp, err := validateJson(p.inputRequest, "date", "thread", "message", "user", "forum")
+	if err != nil {
+		return resp
+	}
+
+	args = append(args, p.inputRequest.json["date"])
+	args = append(args, p.inputRequest.json["thread"])
+	args = append(args, p.inputRequest.json["message"])
+	args = append(args, p.inputRequest.json["user"])
+	args = append(args, p.inputRequest.json["forum"])
+
+	result, err := validateBoolParams(p.inputRequest.json, &args, "isApproved", "isHighlighted", "isEdited", "isSpam", "isDeleted")
+	if err != nil {
+		return result
+	}
+
+	// parent here
+	if p.inputRequest.json["parent"] != nil {
+		if checkFloat64Type(p.inputRequest.json["parent"]) == false {
+			return createInvalidResponse()
+		} else {
+			parent := p.inputRequest.json["parent"].(float64)
+
+			// find parent and last chils
+			parentQuery := "SELECT id, parent FROM post WHERE id = ? && isDeleted = false OR parent LIKE ?"
+			var parentArgs []interface{}
+
+			parentArgs = append(parentArgs, parent)
+			parentArgs = append(parentArgs, intToString(int(parent))+".%")
+
+			getThread, err := selectQuery(parentQuery, &parentArgs, p.db)
+			if err != nil {
+				panic(err)
+			}
+
+			// check query
+			if getThread.rows == 0 || getThread.values[0]["id"] != intToString(int(parent)) {
+				return createNotExistResponse()
+			}
+
+			fmt.Println(getThread)
+
+			// find place to child
+			var child string
+			if getThread.rows == 1 {
+				getParent := getThread.values[0]["parent"]
+
+				if getParent == "NULL" {
+					child = intToString(int(parent)) + ".1"
+				} else {
+					child = getParent + ".1"
+				}
+			} else {
+				lastChild := getThread.values[getThread.rows-1]["parent"]
+
+				arr := strings.SplitAfter(lastChild, ".")
+				last, _ := strconv.Atoi(arr[len(arr)-1])
+				fmt.Println("last = ", last)
+				last = last + 1
+
+				arr = arr[:len(arr)-1]
+				fmt.Println("arr = ", arr)
+				arr = append(arr, strconv.Itoa(last))
+				fmt.Println("arr = ", arr)
+
+				child = strings.Join(arr, "")
+				fmt.Println("child = ", child)
+			}
+
+			args = append(args, child)
+		}
+	} else {
+		args = append(args, nil)
+	}
+
+	fmt.Println(args)
+
+	dbResp, err := execQuery(query, &args, p.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	tempCounter := 5
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"date":          p.inputRequest.json["date"],
+		"forum":         p.inputRequest.json["forum"],
+		"id":            dbResp.lastId,
+		"isApproved":    args[incInt(&tempCounter)],
+		"isHighlighted": args[tempCounter+0],
+		"isEdited":      args[tempCounter+1],
+		"isSpam":        args[tempCounter+2],
+		"isDeleted":     args[tempCounter+3],
+		"message":       p.inputRequest.json["message"],
+		"parent":        args[tempCounter+4],
+		"thread":        4,
+		"user":          p.inputRequest.json["user"],
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	fmt.Println("thread.create()")
+
+	return resp
 	return "DO IT"
 }
 
@@ -1677,6 +1818,58 @@ func stringToInt(inputStr string) int {
 	if err != nil {
 		panic(err)
 	}
+	return result
+}
+
+func incInt(value *int) int {
+	*value += 1
+	return *value
+}
+
+func toBase95(value int) string {
+	BASE95 := ` !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
+	length := 5
+	base := len(BASE95)
+	result := make([]byte, 5)
+
+	for i := 0; i < length; i++ {
+		result[i] = BASE95[0]
+	}
+
+	if value == 0 {
+		return string(result)
+	}
+
+	counter := 0
+	for value != 0 {
+		mod := value % base
+
+		result[length-counter-1] = BASE95[mod]
+		counter++
+
+		value = value / base
+	}
+
+	return string(result)
+}
+
+func fromBase95(value string) int {
+	BASE95 := ` !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
+	length := 5
+	base := len(BASE95)
+	var result int
+
+	counter := 0
+	step := 1
+	for i := 0; i < length; i++ {
+		index := strings.Index(BASE95, string(value[length-counter-1]))
+		counter++
+
+		result = result + index*step
+
+		step = step * base
+	}
+
 	return result
 }
 
