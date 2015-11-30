@@ -1575,66 +1575,75 @@ func (p *Post) create() string {
 		return result
 	}
 
+	boolParent := false
+
 	// parent here
 	if p.inputRequest.json["parent"] != nil {
 		if checkFloat64Type(p.inputRequest.json["parent"]) == false {
 			return createInvalidResponse()
-		} else {
-			parent := p.inputRequest.json["parent"].(float64)
-
-			// find parent and last chils
-			parentQuery := "SELECT id, parent FROM post WHERE id = ? && isDeleted = false OR parent LIKE ?"
-			var parentArgs []interface{}
-
-			parentArgs = append(parentArgs, parent)
-			parentArgs = append(parentArgs, intToString(int(parent))+".%")
-
-			getThread, err := selectQuery(parentQuery, &parentArgs, p.db)
-			if err != nil {
-				panic(err)
-			}
-
-			// check query
-			if getThread.rows == 0 || getThread.values[0]["id"] != intToString(int(parent)) {
-				return createNotExistResponse()
-			}
-
-			fmt.Println(getThread)
-
-			// find place to child
-			var child string
-			if getThread.rows == 1 {
-				getParent := getThread.values[0]["parent"]
-
-				if getParent == "NULL" {
-					child = intToString(int(parent)) + ".1"
-				} else {
-					child = getParent + ".1"
-				}
-			} else {
-				lastChild := getThread.values[getThread.rows-1]["parent"]
-
-				arr := strings.SplitAfter(lastChild, ".")
-				last, _ := strconv.Atoi(arr[len(arr)-1])
-				fmt.Println("last = ", last)
-				last = last + 1
-
-				arr = arr[:len(arr)-1]
-				fmt.Println("arr = ", arr)
-				arr = append(arr, strconv.Itoa(last))
-				fmt.Println("arr = ", arr)
-
-				child = strings.Join(arr, "")
-				fmt.Println("child = ", child)
-			}
-
-			args = append(args, child)
 		}
+		//
+		// search parent here
+		//
+
+		parent := p.inputRequest.json["parent"].(float64)
+
+		// find parent and last chils
+		parentQuery := "SELECT id, parent FROM post WHERE id = ? && isDeleted = false"
+		var parentArgs []interface{}
+
+		parentArgs = append(parentArgs, parent)
+
+		getThread, err := selectQuery(parentQuery, &parentArgs, p.db)
+		if err != nil {
+			panic(err)
+		}
+
+		// check query
+		if getThread.rows == 0 {
+			return createNotExistResponse()
+		}
+
+		parentArgs = parentArgs[0:0] // clear args
+
+		//
+		// search place for child
+		//
+
+		var child string
+		getParent := getThread.values[0]["parent"]
+
+		parentQuery = "SELECT parent FROM post WHERE parent LIKE ?"
+		parentArgs = append(parentArgs, getParent+"%")
+
+		getThread, err = selectQuery(parentQuery, &parentArgs, p.db)
+		if err != nil {
+			panic(err)
+		}
+
+		// because the first element is parent
+		if getThread.rows == 1 {
+			newParent := getParent
+			newChild := toBase95(1)
+
+			child = newParent + newChild
+		} else {
+			lastChild := getThread.values[getThread.rows-1]["parent"]
+			newParent := getParent
+			oldChild := fromBase95(lastChild[len(lastChild)-5:])
+
+			oldChild++
+
+			newChild := toBase95(oldChild)
+
+			child = newParent + newChild
+		}
+
+		args = append(args, child)
 	} else {
 		args = append(args, nil)
+		boolParent = true
 	}
-
-	fmt.Println(args)
 
 	dbResp, err := execQuery(query, &args, p.db)
 	if err != nil {
@@ -1647,6 +1656,17 @@ func (p *Post) create() string {
 		}
 
 		return resp
+	}
+
+	if boolParent {
+		boolParentQuery := "UPDATE post SET parent = ? WHERE id = ?"
+		var boolParentArgs []interface{}
+
+		parent := toBase95(int(dbResp.lastId))
+		boolParentArgs = append(boolParentArgs, parent)
+		boolParentArgs = append(boolParentArgs, dbResp.lastId)
+
+		_, _ = execQuery(boolParentQuery, &boolParentArgs, p.db)
 	}
 
 	tempCounter := 5
@@ -1662,7 +1682,7 @@ func (p *Post) create() string {
 		"isDeleted":     args[tempCounter+3],
 		"message":       p.inputRequest.json["message"],
 		"parent":        args[tempCounter+4],
-		"thread":        4,
+		"thread":        p.inputRequest.json["thread"].(float64),
 		"user":          p.inputRequest.json["user"],
 	}
 
@@ -1671,10 +1691,9 @@ func (p *Post) create() string {
 		panic(err.Error())
 	}
 
-	fmt.Println("thread.create()")
+	fmt.Println("post.create()")
 
 	return resp
-	return "DO IT"
 }
 
 // DO IT
