@@ -637,6 +637,13 @@ func (u *User) listFollowing() string {
 	return resp
 }
 
+func (u *User) listPosts() string {
+	delete(u.inputRequest.query, "forum")
+
+	p := Post{inputRequest: u.inputRequest, db: u.db}
+	return p.list()
+}
+
 func (u *User) unfollow() string {
 	var resp string
 	query := "DELETE FROM follow WHERE follower = ? AND followee = ?"
@@ -716,6 +723,8 @@ func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 			result = user.listFollowers()
 		} else if inputRequest.path == "/db/api/user/listFollowing/" {
 			result = user.listFollowing()
+		} else if inputRequest.path == "/db/api/user/listPosts/" {
+			result = user.listPosts()
 		}
 	} else if inputRequest.method == "POST" {
 
@@ -1045,7 +1054,7 @@ func (t *Thread) create() string {
 }
 
 func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
-	query := "SELECT * FROM thread WHERE id = ?"
+	query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
 	var args []interface{}
 	args = append(args, t.inputRequest.query["thread"][0])
 
@@ -1064,6 +1073,8 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 	respId, _ := strconv.ParseInt(getThread.values[0]["id"], 10, 64)
 	respLikes, _ := strconv.ParseInt(getThread.values[0]["likes"], 10, 64)
 	respDislikes, _ := strconv.ParseInt(getThread.values[0]["dislikes"], 10, 64)
+	respPoints, _ := strconv.ParseInt(getThread.values[0]["points"], 10, 64)
+	respPosts, _ := strconv.ParseInt(getThread.values[0]["posts"], 10, 64)
 	respIsClosed, _ := strconv.ParseBool(getThread.values[0]["isClosed"])
 	respIsDeleted, _ := strconv.ParseBool(getThread.values[0]["isDeleted"])
 
@@ -1077,8 +1088,8 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 		"isDeleted": respIsDeleted,
 		"likes":     respLikes,
 		"message":   getThread.values[0]["message"],
-		"points":    0,
-		"posts":     0,
+		"points":    respPoints,
+		"posts":     respPosts,
 		"slug":      getThread.values[0]["slug"],
 		"title":     getThread.values[0]["title"],
 		"user":      getThread.values[0]["user"],
@@ -1088,7 +1099,6 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 }
 
 func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []map[string]interface{}) {
-
 	getThread, err := selectQuery(query, &args, t.db)
 	if err != nil {
 		panic(err)
@@ -1113,6 +1123,8 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 		respId, _ := strconv.ParseInt(value["id"], 10, 64)
 		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
 		respDislikes, _ := strconv.ParseInt(value["dislikes"], 10, 64)
+		respPoints, _ := strconv.ParseInt(value["points"], 10, 64)
+		respPosts, _ := strconv.ParseInt(value["posts"], 10, 64)
 		respIsClosed, _ := strconv.ParseBool(value["isClosed"])
 		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
 
@@ -1125,8 +1137,8 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 			"isDeleted": respIsDeleted,
 			"likes":     respLikes,
 			"message":   value["message"],
-			"points":    0,
-			"posts":     0,
+			"points":    respPoints,
+			"posts":     respPosts,
 			"slug":      value["slug"],
 			"title":     value["title"],
 			"user":      value["user"],
@@ -1187,13 +1199,13 @@ func (t *Thread) list() string {
 
 	// Validate query values
 	if len(t.inputRequest.query["user"]) == 1 {
-		query = "SELECT * FROM thread WHERE user = ?"
+		query = "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
 		args = append(args, t.inputRequest.query["user"][0])
 
 		f = true
 	}
 	if len(t.inputRequest.query["forum"]) == 1 && f == false {
-		query = "SELECT * FROM thread WHERE forum = ?"
+		query = "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
 		args = append(args, t.inputRequest.query["forum"][0])
 
 		f = true
@@ -1205,9 +1217,11 @@ func (t *Thread) list() string {
 
 	// Check and validate optional params
 	if len(t.inputRequest.query["since"]) >= 1 {
-		query += " AND date > ?"
+		query += " AND t.date > ?"
 		args = append(args, t.inputRequest.query["since"][0])
 	}
+
+	query = query + " GROUP BY t.id"
 	if len(t.inputRequest.query["order"]) >= 1 {
 		orderType := t.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
@@ -1215,7 +1229,7 @@ func (t *Thread) list() string {
 			return resp
 		}
 
-		query += fmt.Sprintf(" ORDER BY date %s", orderType)
+		query += fmt.Sprintf(" ORDER BY t.date %s", orderType)
 	}
 	if len(t.inputRequest.query["limit"]) >= 1 {
 		limitValue := t.inputRequest.query["limit"][0]
@@ -1243,6 +1257,56 @@ func (t *Thread) list() string {
 
 // DO IT
 func (t *Thread) listPosts() string {
+	/*
+		var query, order, resp string
+		f := false
+		var args []interface{}
+
+		// Validate query values
+		if len(t.inputRequest.query["thread"]) == 1 {
+			query = "SELECT * FROM post WHERE thread = ?"
+			args = append(args, t.inputRequest.query["thread"][0])
+
+			f = true
+		}
+		if f == false {
+			resp = createInvalidResponse()
+			return resp
+		}
+
+		// order by here
+		if len(t.inputRequest.query["order"]) >= 1 {
+			orderType := t.inputRequest.query["order"][0]
+			if orderType != "desc" && orderType != "asc" {
+				resp = createInvalidResponse()
+				return resp
+			}
+
+			order = fmt.Sprintf(" ORDER BY date %s", orderType)
+		} else {
+			order = " ORDER BY date DESC"
+		}
+
+		responseCode, responseMsg := p.getList(query, order, args)
+
+		// check responseCode
+		if responseCode == 100500 {
+			resp = createInvalidResponse()
+			return resp
+		} else if responseCode == 1 {
+			resp, _ = createResponse(responseCode, responseMsg[0])
+			return resp
+		} else if responseCode == 0 {
+			resp, err := createResponseFromArray(responseCode, responseMsg)
+			if err != nil {
+				panic(err.Error())
+			}
+			return resp
+		} else {
+			resp = createInvalidResponse()
+			return resp
+		}
+	*/
 
 	return "DO IT"
 }
@@ -1459,9 +1523,9 @@ func (t *Thread) vote() string {
 	vote := t.inputRequest.json["vote"].(float64)
 
 	if vote == 1 {
-		query = "UPDATE thread SET likes = likes + 1 WHERE id = ?"
+		query = "UPDATE thread SET likes = likes + 1, points = points + 1 WHERE id = ?"
 	} else if vote == -1 {
-		query = "UPDATE thread SET dislikes = dislikes + 1 WHERE id = ?"
+		query = "UPDATE thread SET dislikes = dislikes + 1, points = points - 1 WHERE id = ?"
 	} else {
 		resp = createInvalidResponse()
 		return resp
@@ -1550,7 +1614,6 @@ type Post struct {
 	db           *sql.DB
 }
 
-// DO IT
 func (p *Post) create() string {
 	var resp string
 	query := "INSERT INTO post (date, thread, message, user, forum, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -1696,40 +1759,466 @@ func (p *Post) create() string {
 	return resp
 }
 
-// DO IT
+func (p *Post) getParentId(id int64, path string) int {
+	if len(path) == 5 {
+		return int(id)
+	} else if len(path) == 10 {
+		return fromBase95(path[len(path)-10 : len(path)-5])
+	} else {
+		parentId := path[:len(path)-5]
+
+		query := "SELECT id FROM post WHERE parent = ?"
+		var args []interface{}
+		args = append(args, parentId)
+
+		getParent, _ := selectQuery(query, &args, p.db)
+
+		respId, _ := strconv.ParseInt(getParent.values[0]["id"], 10, 64)
+
+		return int(respId)
+	}
+}
+
+func (p *Post) updateBoolBasic(query string, value bool) string {
+	var resp string
+
+	var args []interface{}
+
+	resp, err := validateJson(p.inputRequest, "post")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(p.inputRequest.json["post"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	postId := p.inputRequest.json["post"].(float64)
+
+	args = append(args, value)
+	args = append(args, p.inputRequest.json["post"])
+
+	dbResp, err := execQuery(query, &args, p.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	if dbResp.rowCount == 0 {
+		p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(postId)))
+		responseCode, responseMsg := p.getPostDetails()
+
+		if responseCode != 0 {
+			resp = createNotExistResponse()
+			return resp
+		}
+
+		resp, err = createResponse(responseCode, responseMsg)
+		if err != nil {
+			panic(err.Error())
+		}
+		return resp
+	}
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"post": postId,
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
+}
+
+func (p *Post) getPostDetails() (int, map[string]interface{}) {
+	query := "SELECT * FROM post WHERE id = ?"
+	var args []interface{}
+	args = append(args, p.inputRequest.query["post"][0])
+
+	getPost, err := selectQuery(query, &args, p.db)
+	if err != nil {
+		panic(err)
+	}
+
+	if getPost.rows == 0 {
+		responseCode := 1
+		errorMessage := map[string]interface{}{"msg": "Not found"}
+
+		return responseCode, errorMessage
+	}
+
+	respId, _ := strconv.ParseInt(getPost.values[0]["id"], 10, 64)
+	respLikes, _ := strconv.ParseInt(getPost.values[0]["likes"], 10, 64)
+	respDislikes, _ := strconv.ParseInt(getPost.values[0]["dislikes"], 10, 64)
+	respPoints, _ := strconv.ParseInt(getPost.values[0]["points"], 10, 64)
+	respThread, _ := strconv.ParseInt(getPost.values[0]["thread"], 10, 64)
+	respIsApproved, _ := strconv.ParseBool(getPost.values[0]["isApproved"])
+	respIsDeleted, _ := strconv.ParseBool(getPost.values[0]["isDeleted"])
+	respIsEdited, _ := strconv.ParseBool(getPost.values[0]["isEdited"])
+	respIsHighlighted, _ := strconv.ParseBool(getPost.values[0]["isHighlighted"])
+	respIsSpam, _ := strconv.ParseBool(getPost.values[0]["isSpam"])
+
+	responseCode := 0
+	responseMsg := map[string]interface{}{
+		"date":          getPost.values[0]["date"],
+		"dislikes":      respDislikes,
+		"forum":         getPost.values[0]["forum"],
+		"id":            respId,
+		"isApproved":    respIsApproved,
+		"isDeleted":     respIsDeleted,
+		"isEdited":      respIsEdited,
+		"isHighlighted": respIsHighlighted,
+		"isSpam":        respIsSpam,
+		"likes":         respLikes,
+		"message":       getPost.values[0]["message"],
+		"parent":        nil,
+		"points":        respPoints,
+		"thread":        respThread,
+		"user":          getPost.values[0]["user"],
+	}
+
+	parent := p.getParentId(respId, getPost.values[0]["parent"])
+	if parent == int(respId) {
+		responseMsg["parent"] = nil
+	} else {
+		responseMsg["parent"] = parent
+	}
+
+	return responseCode, responseMsg
+}
+
 func (p *Post) details() string {
+	var resp string
+	var relatedUser, relatedThread, relatedForum bool
+	if len(p.inputRequest.query["post"]) != 1 {
+		resp = createInvalidResponse()
+		return resp
+	}
 
-	return "DO IT"
+	if len(p.inputRequest.query["related"]) >= 1 && stringInSlice("user", p.inputRequest.query["related"]) {
+		relatedUser = true
+	}
+	if len(p.inputRequest.query["related"]) >= 1 && stringInSlice("thread", p.inputRequest.query["related"]) {
+		relatedThread = true
+	}
+	if len(p.inputRequest.query["related"]) >= 1 && stringInSlice("forum", p.inputRequest.query["related"]) {
+		relatedForum = true
+	}
+
+	responseCode, responseMsg := p.getPostDetails()
+
+	if relatedUser {
+		u := User{inputRequest: p.inputRequest, db: p.db}
+		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], responseMsg["user"].(string))
+		_, userDetails := u.getUserDetails()
+
+		responseMsg["user"] = userDetails
+	}
+
+	if relatedThread {
+		t := Thread{inputRequest: p.inputRequest, db: p.db}
+		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], int64ToString(responseMsg["thread"].(int64)))
+		_, threadDetails := t.getThreadDetails()
+
+		responseMsg["thread"] = threadDetails
+	}
+
+	if relatedForum {
+		f := Forum{inputRequest: p.inputRequest, db: p.db}
+		f.inputRequest.query["user"] = f.inputRequest.query["user"][:0]
+		f.inputRequest.query["forum"] = append(f.inputRequest.query["forum"], responseMsg["forum"].(string))
+		_, forumDetails := f.getForumDetails()
+
+		responseMsg["forum"] = forumDetails
+	}
+
+	resp, err := createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
 }
 
-// DO IT
+func (p *Post) getArrayPostDetails(query string, args []interface{}) (int, []map[string]interface{}) {
+	getPost, err := selectQuery(query, &args, p.db)
+	if err != nil {
+		panic(err)
+	}
+
+	if getPost.rows == 0 {
+		var responseMsg []map[string]interface{}
+		responseCode := 1
+		errorMessage := map[string]interface{}{
+			"msg": "Not found",
+		}
+		responseMsg = append(responseMsg, errorMessage)
+
+		// fmt.Println(responseCode, errorMessage)
+		return responseCode, responseMsg
+	}
+
+	responseCode := 0
+	var responseMsg []map[string]interface{}
+
+	for _, value := range getPost.values {
+		respId, _ := strconv.ParseInt(value["id"], 10, 64)
+		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
+		respDislikes, _ := strconv.ParseInt(value["dislikes"], 10, 64)
+		respPoints, _ := strconv.ParseInt(value["points"], 10, 64)
+		respThread, _ := strconv.ParseInt(value["thread"], 10, 64)
+		respIsApproved, _ := strconv.ParseBool(value["isApproved"])
+		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
+		respIsEdited, _ := strconv.ParseBool(value["isEdited"])
+		respIsHighlighted, _ := strconv.ParseBool(value["isHighlighted"])
+		respIsSpam, _ := strconv.ParseBool(value["isSpam"])
+
+		tempMsg := map[string]interface{}{
+			"date":          value["date"],
+			"dislikes":      respDislikes,
+			"forum":         value["forum"],
+			"id":            respId,
+			"isApproved":    respIsApproved,
+			"isDeleted":     respIsDeleted,
+			"isEdited":      respIsEdited,
+			"isHighlighted": respIsHighlighted,
+			"isSpam":        respIsSpam,
+			"likes":         respLikes,
+			"message":       value["message"],
+			"parent":        nil,
+			"points":        respPoints,
+			"thread":        respThread,
+			"user":          value["user"],
+		}
+
+		parent := p.getParentId(respId, value["parent"])
+		if parent == int(respId) {
+			tempMsg["parent"] = nil
+		} else {
+			tempMsg["parent"] = parent
+		}
+
+		responseMsg = append(responseMsg, tempMsg)
+	}
+
+	return responseCode, responseMsg
+}
+
+func (p *Post) getList(query string, order string, args []interface{}) (int, []map[string]interface{}) {
+	// Check and validate optional params
+	if len(p.inputRequest.query["since"]) >= 1 {
+		query += " AND date > ?"
+		args = append(args, p.inputRequest.query["since"][0])
+	}
+
+	query += order
+
+	if len(p.inputRequest.query["limit"]) >= 1 {
+		limitValue := p.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			return 100500, nil
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	// Response here
+	responseCode, responseMsg := p.getArrayPostDetails(query, args)
+	if responseCode != 0 {
+		return responseCode, responseMsg
+	}
+	return responseCode, responseMsg
+}
+
 func (p *Post) list() string {
+	var query, order, resp string
+	f := false
+	var args []interface{}
 
-	return "DO IT"
+	// Validate query values
+	if len(p.inputRequest.query["user"]) == 1 {
+		query = "SELECT * FROM post WHERE user = ?"
+		args = append(args, p.inputRequest.query["user"][0])
+
+		f = true
+	}
+	if len(p.inputRequest.query["forum"]) == 1 && f == false {
+		query = "SELECT * FROM post WHERE forum = ?"
+		args = append(args, p.inputRequest.query["forum"][0])
+
+		f = true
+	}
+	if f == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// order by here
+	if len(p.inputRequest.query["order"]) >= 1 {
+		orderType := p.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
+			resp = createInvalidResponse()
+			return resp
+		}
+
+		order = fmt.Sprintf(" ORDER BY date %s", orderType)
+	} else {
+		order = " ORDER BY date DESC"
+	}
+
+	responseCode, responseMsg := p.getList(query, order, args)
+
+	// check responseCode
+	if responseCode == 100500 {
+		resp = createInvalidResponse()
+		return resp
+	} else if responseCode == 1 {
+		resp, _ = createResponse(responseCode, responseMsg[0])
+		return resp
+	} else if responseCode == 0 {
+		resp, err := createResponseFromArray(responseCode, responseMsg)
+		if err != nil {
+			panic(err.Error())
+		}
+		return resp
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
 }
 
-// DO IT
 func (p *Post) remove() string {
+	query := "UPDATE post SET isDeleted = ? WHERE id = ?"
 
-	return "DO IT"
+	resp := p.updateBoolBasic(query, true)
+
+	return resp
 }
 
-// DO IT
 func (p *Post) restore() string {
+	query := "UPDATE post SET isDeleted = ? WHERE id = ?"
 
-	return "DO IT"
+	resp := p.updateBoolBasic(query, false)
+
+	return resp
 }
 
-// DO IT
 func (p *Post) update() string {
+	var resp string
+	query := "UPDATE post SET message = ?, isEdited = true WHERE id = ?"
 
-	return "DO IT"
+	var args []interface{}
+
+	resp, err := validateJson(p.inputRequest, "post", "message")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(p.inputRequest.json["post"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	threadId := p.inputRequest.json["post"].(float64)
+
+	args = append(args, p.inputRequest.json["message"])
+	args = append(args, p.inputRequest.json["post"])
+
+	_, err = execQuery(query, &args, p.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(threadId)))
+	responseCode, responseMsg := p.getPostDetails()
+
+	if responseCode != 0 {
+		resp = createNotExistResponse()
+		return resp
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+	return resp
 }
 
-// DO IT
 func (p *Post) vote() string {
+	var resp string
+	var query string
 
-	return "DO IT"
+	var args []interface{}
+
+	resp, err := validateJson(p.inputRequest, "post", "vote")
+	if err != nil {
+		return resp
+	}
+
+	if checkFloat64Type(p.inputRequest.json["post"]) == false || checkFloat64Type(p.inputRequest.json["vote"]) == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	postId := p.inputRequest.json["post"].(float64)
+	vote := p.inputRequest.json["vote"].(float64)
+
+	if vote == 1 {
+		query = "UPDATE post SET likes = likes + 1, points = points + 1 WHERE id = ?"
+	} else if vote == -1 {
+		query = "UPDATE post SET dislikes = dislikes + 1, points = points - 1 WHERE id = ?"
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	args = append(args, p.inputRequest.json["post"])
+
+	_, err = execQuery(query, &args, p.db)
+	if err != nil {
+		fmt.Println(err)
+		responseCode, errorMessage := errorExecParse(err)
+
+		resp, err = createResponse(responseCode, errorMessage)
+		if err != nil {
+			panic(err)
+		}
+
+		return resp
+	}
+
+	p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(postId)))
+	responseCode, responseMsg := p.getPostDetails()
+
+	if responseCode != 0 {
+		resp = createNotExistResponse()
+		return resp
+	}
+
+	resp, err = createResponse(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+	return resp
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
@@ -1814,6 +2303,11 @@ func floatToString(inputNum float64) string {
 func intToString(inputNum int) string {
 	// to convert a float number to a string
 	return strconv.Itoa(inputNum)
+}
+
+func int64ToString(inputNum int64) string {
+	// to convert a float number to a string
+	return strconv.FormatInt(inputNum, 10)
 }
 
 func checkFloat64Type(inputNum interface{}) bool {
