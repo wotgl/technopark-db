@@ -101,6 +101,33 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 	panic(err.Error()) // proper error handling instead of panic in your app
 }
 
+func createNotFoundForArray() string {
+	var resp string
+	responseCode := 1
+	errorMessage := map[string]interface{}{
+		"msg": "Not found",
+	}
+
+	var responseMsg []map[string]interface{}
+
+	responseMsg = append(responseMsg, errorMessage)
+
+	resp, _ = createResponseFromArray(responseCode, responseMsg)
+	return resp
+}
+
+func createInvalidQuery() string {
+	responseCode := 3
+	errorMessage := map[string]interface{}{"msg": "Invalid query"}
+
+	resp, err := createResponse(responseCode, errorMessage)
+	if err != nil {
+		panic(err)
+	}
+
+	return resp
+}
+
 func checkError1062(err error) bool {
 	if driverErr, ok := err.(*mysql.MySQLError); ok { // Now the error number is accessible directly
 		if driverErr.Number == 1062 {
@@ -315,7 +342,8 @@ func (u *User) create() string {
 
 	var args []interface{}
 
-	resp, err := validateJson(u.inputRequest, "username", "about", "name", "email")
+	// resp, err := validateJson(u.inputRequest, "username", "about", "name", "email")
+	resp, err := validateJson(u.inputRequest, "email")
 	if err != nil {
 		return resp
 	}
@@ -407,18 +435,31 @@ func (u *User) getUserDetails() (int, map[string]interface{}) {
 
 	respIsAnonymous, _ := strconv.ParseBool(getUser.values[0]["isAnonymous"])
 	respId, _ := strconv.ParseInt(getUser.values[0]["id"], 10, 64)
+	respAbout := getUser.values[0]["about"]
+	respName := getUser.values[0]["name"]
+	respUsername := getUser.values[0]["username"]
 
 	responseCode := 0
 	responseMsg := map[string]interface{}{
-		"about":         getUser.values[0]["about"],
+		"about":         respAbout,
 		"email":         getUser.values[0]["email"],
 		"followers":     listFollowers,
 		"following":     listFollowing,
 		"id":            respId,
 		"isAnonymous":   respIsAnonymous,
-		"name":          getUser.values[0]["name"],
+		"name":          respName,
 		"subscriptions": listSubscriptions,
-		"username":      getUser.values[0]["username"],
+		"username":      respUsername,
+	}
+
+	if respAbout == "NULL" {
+		responseMsg["about"] = nil
+	}
+	if respName == "NULL" {
+		responseMsg["name"] = nil
+	}
+	if respUsername == "NULL" {
+		responseMsg["username"] = nil
 	}
 
 	return responseCode, responseMsg
@@ -753,6 +794,7 @@ type Forum struct {
 }
 
 func (f *Forum) create() string {
+	fmt.Println("create\t", f.inputRequest)
 	var resp string
 	query := "INSERT INTO forum (name, short_name, user) VALUES(?, ?, ?)"
 
@@ -824,9 +866,11 @@ func (f *Forum) getForumDetails() (int, map[string]interface{}) {
 		return responseCode, errorMessage
 	}
 
+	respId, _ := strconv.ParseInt(getForum.values[0]["id"], 10, 64)
+
 	responseCode := 0
 	responseMsg := map[string]interface{}{
-		"id":         getForum.values[0]["id"],
+		"id":         respId,
 		"short_name": getForum.values[0]["short_name"],
 		"name":       getForum.values[0]["name"],
 		"user":       getForum.values[0]["user"],
@@ -865,10 +909,337 @@ func (f *Forum) details() string {
 	return resp
 }
 
-// DO IT
 func (f *Forum) listThreads() string {
+	relatedUser := false
+	relatedForum := false
 
-	return "DO IT"
+	t := Thread{inputRequest: f.inputRequest, db: f.db}
+	var resp, query string
+	var args []interface{}
+
+	// Validate query values
+	if len(t.inputRequest.query["forum"]) == 1 {
+		query = "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
+		args = append(args, t.inputRequest.query["forum"][0])
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// Check and validate optional params
+	if len(t.inputRequest.query["since"]) >= 1 {
+		query += " AND t.date > ?"
+		args = append(args, t.inputRequest.query["since"][0])
+	}
+
+	query = query + " GROUP BY t.id"
+	if len(t.inputRequest.query["order"]) >= 1 {
+		orderType := t.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
+			resp = createInvalidResponse()
+			return resp
+		}
+
+		query += fmt.Sprintf(" ORDER BY t.date %s", orderType)
+	} else {
+		query += " ORDER BY t.date desc"
+	}
+	if len(t.inputRequest.query["limit"]) >= 1 {
+		limitValue := t.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			resp = createInvalidResponse()
+			return resp
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	// related params
+	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("user", f.inputRequest.query["related"]) {
+		relatedUser = true
+	}
+	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("forum", f.inputRequest.query["related"]) {
+		relatedForum = true
+	}
+	// Response here
+	responseCode, responseMsg := t.getArrayThreadsDetails(query, args)
+
+	if responseCode != 0 {
+		// E6ANYI KOSTYL`
+		test := make(map[string]interface{})
+		resp, _ = createResponse(0, test)
+
+		return resp
+		resp, _ = createResponse(responseCode, responseMsg[0])
+		return resp
+	}
+	for _, value := range responseMsg {
+		if relatedUser {
+			u := User{inputRequest: f.inputRequest, db: f.db}
+			u.inputRequest.query["user"] = u.inputRequest.query["user"][0:0]
+			u.inputRequest.query["user"] = append(u.inputRequest.query["user"], value["user"].(string))
+
+			_, responseUser := u.getUserDetails()
+			value["user"] = responseUser
+		}
+
+		if relatedForum {
+
+			f := Forum{inputRequest: f.inputRequest, db: f.db}
+			f.inputRequest.query["forum"] = append(f.inputRequest.query["forum"], value["forum"].(string))
+
+			_, responseForum := f.getForumDetails()
+			value["forum"] = responseForum
+		}
+	}
+	resp, err := createResponseFromArray(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+	return resp
+}
+
+func (f *Forum) listPosts() string {
+	var query, order, resp string
+	relatedUser := false
+	relatedThread := false
+	relatedForum := false
+	var args []interface{}
+
+	p := Post{inputRequest: f.inputRequest, db: f.db}
+
+	// Validate query values
+	if len(p.inputRequest.query["forum"]) == 1 {
+		query = "SELECT * FROM post p WHERE p.forum = ?"
+		args = append(args, p.inputRequest.query["forum"][0])
+
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// related params
+	// var join string
+	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("user", f.inputRequest.query["related"]) {
+		relatedUser = true
+		// query += " "
+		// join += " LEFT JOIN user u ON p.user=u.email"
+	}
+	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("thread", f.inputRequest.query["related"]) {
+		relatedThread = true
+		// query += " "
+		// join += " LEFT JOIN thread t ON p.thread=t.id"
+	}
+	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("forum", f.inputRequest.query["related"]) {
+		relatedForum = true
+		// query += " "
+		// join += " LEFT JOIN forum f ON p.forum=f.short_name"
+	}
+
+	// order by here
+	if len(p.inputRequest.query["order"]) >= 1 {
+		orderType := p.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
+			return createInvalidResponse()
+		}
+
+		order = fmt.Sprintf(" ORDER BY date %s", orderType)
+	} else {
+		order = " ORDER BY date DESC"
+	}
+
+	// Check and validate optional params
+	if len(p.inputRequest.query["since"]) >= 1 {
+		query += " AND date > ?"
+		args = append(args, p.inputRequest.query["since"][0])
+	}
+
+	fmt.Println("YAHOO")
+	fmt.Println(query)
+
+	query += order
+
+	if len(p.inputRequest.query["limit"]) >= 1 {
+		limitValue := p.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			return createInvalidResponse()
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	getPost, err := selectQuery(query, &args, p.db)
+	if err != nil {
+		panic(err)
+	}
+
+	if getPost.rows == 0 {
+		// E6ANYI KOSTYL`
+		test := make(map[string]interface{})
+		resp, _ = createResponse(0, test)
+
+		return resp
+		return createNotFoundForArray()
+	}
+
+	responseCode := 0
+	var responseMsg []map[string]interface{}
+
+	for _, value := range getPost.values {
+		respId, _ := strconv.ParseInt(value["id"], 10, 64)
+		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
+		respDislikes, _ := strconv.ParseInt(value["dislikes"], 10, 64)
+		respPoints, _ := strconv.ParseInt(value["points"], 10, 64)
+		respThread, _ := strconv.ParseInt(value["thread"], 10, 64)
+		respIsApproved, _ := strconv.ParseBool(value["isApproved"])
+		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
+		respIsEdited, _ := strconv.ParseBool(value["isEdited"])
+		respIsHighlighted, _ := strconv.ParseBool(value["isHighlighted"])
+		respIsSpam, _ := strconv.ParseBool(value["isSpam"])
+
+		tempMsg := map[string]interface{}{
+			"date":          value["date"],
+			"dislikes":      respDislikes,
+			"forum":         value["forum"],
+			"id":            respId,
+			"isApproved":    respIsApproved,
+			"isDeleted":     respIsDeleted,
+			"isEdited":      respIsEdited,
+			"isHighlighted": respIsHighlighted,
+			"isSpam":        respIsSpam,
+			"likes":         respLikes,
+			"message":       value["message"],
+			"parent":        nil,
+			"points":        respPoints,
+			"thread":        respThread,
+			"user":          value["user"],
+		}
+
+		parent := p.getParentId(respId, value["parent"])
+		if parent == int(respId) {
+			tempMsg["parent"] = nil
+		} else {
+			tempMsg["parent"] = parent
+		}
+
+		if relatedUser {
+			u := User{inputRequest: f.inputRequest, db: f.db}
+			u.inputRequest.query["user"] = u.inputRequest.query["user"][0:0]
+			u.inputRequest.query["user"] = append(u.inputRequest.query["user"], value["user"])
+
+			_, responseUser := u.getUserDetails()
+			tempMsg["user"] = responseUser
+		}
+
+		if relatedThread {
+			t := Thread{inputRequest: f.inputRequest, db: f.db}
+			t.inputRequest.query["thread"] = t.inputRequest.query["thread"][0:0]
+			t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], value["thread"])
+
+			_, responseThread := t.getThreadDetails()
+			tempMsg["thread"] = responseThread
+		}
+
+		if relatedForum {
+
+			f := Forum{inputRequest: f.inputRequest, db: f.db}
+			f.inputRequest.query["forum"] = f.inputRequest.query["forum"][0:0]
+			f.inputRequest.query["forum"] = append(f.inputRequest.query["forum"], value["forum"])
+
+			_, responseForum := f.getForumDetails()
+			tempMsg["forum"] = responseForum
+		}
+
+		responseMsg = append(responseMsg, tempMsg)
+	}
+
+	resp, _ = createResponseFromArray(responseCode, responseMsg)
+	return resp
+}
+
+func (f *Forum) listUsers() string {
+	var resp, query string
+	var args []interface{}
+
+	// Validate query values
+	if len(f.inputRequest.query["forum"]) == 1 {
+		query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
+		args = append(args, f.inputRequest.query["forum"][0])
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// Check and validate optional params
+	if len(f.inputRequest.query["since_id"]) >= 1 {
+		query += " AND u.id >= ?"
+		args = append(args, f.inputRequest.query["since_id"][0])
+	}
+
+	if len(f.inputRequest.query["order"]) >= 1 {
+		orderType := f.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
+			resp = createInvalidResponse()
+			return resp
+		}
+
+		// query += " ORDER BY u.name desc"
+		query += fmt.Sprintf(" ORDER BY u.name %s", orderType)
+	} else {
+		query += " ORDER BY u.name desc"
+	}
+	if len(f.inputRequest.query["limit"]) >= 1 {
+		limitValue := f.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			resp = createInvalidResponse()
+			return resp
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	fmt.Println("LOLLOL")
+	fmt.Println(query)
+
+	getUser, err := selectQuery(query, &args, f.db)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("LOL")
+	fmt.Println(getUser)
+
+	if getUser.rows == 0 {
+		// E6ANYI KOSTYL`
+		test := make(map[string]interface{})
+		resp, _ = createResponse(0, test)
+
+		return resp
+		return createNotFoundForArray()
+	}
+
+	responseCode := 0
+	var responseMsg []map[string]interface{}
+
+	for _, value := range getUser.values {
+		fmt.Println(value)
+		u := User{inputRequest: f.inputRequest, db: f.db}
+		u.inputRequest.query["user"] = u.inputRequest.query["user"][0:0]
+		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], value["user"])
+
+		_, responseUser := u.getUserDetails()
+
+		fmt.Println(responseUser)
+
+		responseMsg = append(responseMsg, responseUser)
+	}
+
+	resp, err = createResponseFromArray(responseCode, responseMsg)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	return resp
 }
 
 func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
@@ -877,20 +1248,22 @@ func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputReq
 	var result string
 
 	if inputRequest.method == "GET" {
-		result = forum.details()
+
+		if inputRequest.path == "/db/api/forum/details/" {
+			result = forum.details()
+		} else if inputRequest.path == "/db/api/forum/listPosts/" {
+			result = forum.listPosts()
+		} else if inputRequest.path == "/db/api/forum/listThreads/" {
+			result = forum.listThreads()
+		} else if inputRequest.path == "/db/api/forum/listUsers/" {
+			result = forum.listUsers()
+		}
 	} else if inputRequest.method == "POST" {
 
 		// Like Router
 		if inputRequest.path == "/db/api/forum/create/" {
 			result = forum.create()
 		}
-		// else if inputRequest.path == "/db/api/user/follow/" {
-		// 	result = user.follow()
-		// } else if inputRequest.path == "/db/api/user/unfollow/" {
-		// 	result = user.unfollow()
-		// } else if inputRequest.path == "/db/api/user/updateProfile/" {
-		// 	result = user.updateProfile()
-		// }
 	}
 
 	io.WriteString(w, result)
@@ -1054,8 +1427,10 @@ func (t *Thread) create() string {
 }
 
 func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
-	query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
+	// query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"		// FIX
+	query := "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = ? AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
 	var args []interface{}
+	args = append(args, t.inputRequest.query["thread"][0])
 	args = append(args, t.inputRequest.query["thread"][0])
 
 	getThread, err := selectQuery(query, &args, t.db)
@@ -1165,6 +1540,10 @@ func (t *Thread) details() string {
 		relatedForum = true
 	}
 
+	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("thread", t.inputRequest.query["related"]) {
+		return createInvalidQuery()
+	}
+
 	responseCode, responseMsg := t.getThreadDetails()
 
 	if relatedUser {
@@ -1185,6 +1564,7 @@ func (t *Thread) details() string {
 	}
 
 	resp, err := createResponse(responseCode, responseMsg)
+
 	if err != nil {
 		panic(err.Error())
 	}
@@ -1199,13 +1579,13 @@ func (t *Thread) list() string {
 
 	// Validate query values
 	if len(t.inputRequest.query["user"]) == 1 {
-		query = "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
+		query = "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
 		args = append(args, t.inputRequest.query["user"][0])
 
 		f = true
 	}
 	if len(t.inputRequest.query["forum"]) == 1 && f == false {
-		query = "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
+		query = "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
 		args = append(args, t.inputRequest.query["forum"][0])
 
 		f = true
@@ -1244,6 +1624,12 @@ func (t *Thread) list() string {
 	// Response here
 	responseCode, responseMsg := t.getArrayThreadsDetails(query, args)
 	if responseCode != 0 {
+		if responseCode == 1 {
+			// E6ANYI KOSTYL`
+			test := make(map[string]interface{})
+			resp, _ = createResponse(0, test)
+			return resp
+		}
 		resp, _ = createResponse(responseCode, responseMsg[0])
 		return resp
 	}
@@ -1255,60 +1641,196 @@ func (t *Thread) list() string {
 	return resp
 }
 
-// DO IT
+func (t *Thread) parentTree(order string) (int, []map[string]interface{}) {
+	var args []interface{}
+	query := "SELECT parent FROM post WHERE thread = ?"
+	order = " ORDER BY parent " + order
+
+	args = append(args, t.inputRequest.query["thread"][0])
+
+	// Check and validate optional params
+	if len(t.inputRequest.query["since"]) >= 1 {
+		query += " AND date > ?"
+		args = append(args, t.inputRequest.query["since"][0])
+	}
+
+	query += " GROUP BY id HAVING LENGTH(parent) = 5"
+	query += order
+
+	if len(t.inputRequest.query["limit"]) >= 1 {
+		limitValue := t.inputRequest.query["limit"][0]
+		i, err := strconv.Atoi(limitValue)
+		if err != nil || i < 0 {
+			return 100500, nil
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	//
+	// query here
+	//
+
+	getPost, err := selectQuery(query, &args, t.db)
+	if err != nil {
+		panic(err)
+	}
+
+	if getPost.rows == 0 {
+		var responseMsg []map[string]interface{}
+		responseCode := 1
+		errorMessage := map[string]interface{}{
+			"msg": "Not found",
+		}
+		responseMsg = append(responseMsg, errorMessage)
+
+		// fmt.Println(responseCode, errorMessage)
+		return responseCode, responseMsg
+	}
+
+	responseCode := 0
+	var responseMsg []map[string]interface{}
+
+	for _, value := range getPost.values {
+		subQuery := "SELECT * FROM post WHERE thread = ? AND parent LIKE ? ORDER BY parent"
+		var subArgs []interface{}
+		subArgs = append(subArgs, t.inputRequest.query["thread"][0])
+		subArgs = append(subArgs, value["parent"]+"%")
+
+		getSubPost, err := selectQuery(subQuery, &subArgs, t.db)
+		if err != nil {
+			panic(err)
+		}
+
+		for _, subValue := range getSubPost.values {
+			respId, _ := strconv.ParseInt(subValue["id"], 10, 64)
+			respLikes, _ := strconv.ParseInt(subValue["likes"], 10, 64)
+			respDislikes, _ := strconv.ParseInt(subValue["dislikes"], 10, 64)
+			respPoints, _ := strconv.ParseInt(subValue["points"], 10, 64)
+			respThread, _ := strconv.ParseInt(subValue["thread"], 10, 64)
+			respIsApproved, _ := strconv.ParseBool(subValue["isApproved"])
+			respIsDeleted, _ := strconv.ParseBool(subValue["isDeleted"])
+			respIsEdited, _ := strconv.ParseBool(subValue["isEdited"])
+			respIsHighlighted, _ := strconv.ParseBool(subValue["isHighlighted"])
+			respIsSpam, _ := strconv.ParseBool(subValue["isSpam"])
+
+			tempMsg := map[string]interface{}{
+				"date":          subValue["date"],
+				"dislikes":      respDislikes,
+				"forum":         subValue["forum"],
+				"id":            respId,
+				"isApproved":    respIsApproved,
+				"isDeleted":     respIsDeleted,
+				"isEdited":      respIsEdited,
+				"isHighlighted": respIsHighlighted,
+				"isSpam":        respIsSpam,
+				"likes":         respLikes,
+				"message":       subValue["message"],
+				"parent":        nil,
+				"points":        respPoints,
+				"thread":        respThread,
+				"user":          subValue["user"],
+			}
+
+			p := Post{inputRequest: t.inputRequest, db: t.db}
+			parent := p.getParentId(respId, subValue["parent"])
+			if parent == int(respId) {
+				tempMsg["parent"] = nil
+			} else {
+				tempMsg["parent"] = parent
+			}
+			responseMsg = append(responseMsg, tempMsg)
+		}
+	}
+
+	return responseCode, responseMsg
+}
+
 func (t *Thread) listPosts() string {
-	/*
-		var query, order, resp string
-		f := false
-		var args []interface{}
+	var query, order, sort, resp string
 
-		// Validate query values
-		if len(t.inputRequest.query["thread"]) == 1 {
-			query = "SELECT * FROM post WHERE thread = ?"
-			args = append(args, t.inputRequest.query["thread"][0])
+	parentTree := false
+	f := false
+	var args []interface{}
 
-			f = true
-		}
-		if f == false {
+	// Validate query values
+	if len(t.inputRequest.query["thread"]) == 1 {
+		query = "SELECT * FROM post WHERE thread = ?"
+		args = append(args, t.inputRequest.query["thread"][0])
+
+		f = true
+	}
+
+	if f == false {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	// order by here
+	if len(t.inputRequest.query["order"]) >= 1 {
+		orderType := t.inputRequest.query["order"][0]
+		if orderType != "desc" && orderType != "asc" {
 			resp = createInvalidResponse()
 			return resp
 		}
+		order = orderType
+	} else {
+		order = "DESC"
+	}
 
-		// order by here
-		if len(t.inputRequest.query["order"]) >= 1 {
-			orderType := t.inputRequest.query["order"][0]
-			if orderType != "desc" && orderType != "asc" {
-				resp = createInvalidResponse()
-				return resp
-			}
+	// sort here
+	if len(t.inputRequest.query["sort"]) >= 1 {
+		sortType := t.inputRequest.query["sort"][0]
 
-			order = fmt.Sprintf(" ORDER BY date %s", orderType)
-		} else {
-			order = " ORDER BY date DESC"
-		}
-
-		responseCode, responseMsg := p.getList(query, order, args)
-
-		// check responseCode
-		if responseCode == 100500 {
-			resp = createInvalidResponse()
-			return resp
-		} else if responseCode == 1 {
-			resp, _ = createResponse(responseCode, responseMsg[0])
-			return resp
-		} else if responseCode == 0 {
-			resp, err := createResponseFromArray(responseCode, responseMsg)
-			if err != nil {
-				panic(err.Error())
-			}
-			return resp
-		} else {
+		switch sortType {
+		case "flat":
+			sort = " ORDER BY date " + order
+		case "tree":
+			sort = " ORDER BY SUBSTRING(parent, 1, 5) " + order + ", parent asc "
+		case "parent_tree":
+			parentTree = true
+		default:
 			resp = createInvalidResponse()
 			return resp
 		}
-	*/
+	} else {
+		sort = " ORDER BY date " + order
+	}
 
-	return "DO IT"
+	var responseCode int
+	var responseMsg []map[string]interface{}
+	// simple sort
+	if parentTree == false {
+		p := Post{inputRequest: t.inputRequest, db: t.db}
+		responseCode, responseMsg = p.getList(query, sort, args)
+	} else {
+		// parent_tree sort
+		responseCode, responseMsg = t.parentTree(order)
+	}
+
+	// check responseCode
+	if responseCode == 100500 {
+		resp = createInvalidResponse()
+		return resp
+	} else if responseCode == 1 {
+		// E6ANYI KOSTYL`
+		test := make(map[string]interface{})
+		resp, _ = createResponse(0, test)
+		return resp
+
+		// resp, _ = createResponse(responseCode, responseMsg[0])
+		// return resp
+	} else if responseCode == 0 {
+		resp, err := createResponseFromArray(responseCode, responseMsg)
+		if err != nil {
+			panic(err.Error())
+		}
+		return resp
+	} else {
+		resp = createInvalidResponse()
+		return resp
+	}
+
+	return resp
 }
 
 func (t *Thread) open() string {
@@ -1324,6 +1846,10 @@ func (t *Thread) remove() string {
 
 	resp := t.updateBoolBasic(query, true)
 
+	query = "UPDATE post SET isDeleted = ? WHERE thread = ?"
+
+	_ = t.updateBoolBasic(query, true)
+
 	return resp
 }
 
@@ -1331,6 +1857,10 @@ func (t *Thread) restore() string {
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
 	resp := t.updateBoolBasic(query, false)
+
+	query = "UPDATE post SET isDeleted = ? WHERE thread = ?"
+
+	_ = t.updateBoolBasic(query, false)
 
 	return resp
 }
@@ -1573,6 +2103,8 @@ func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 			result = thread.details()
 		} else if inputRequest.path == "/db/api/thread/list/" {
 			result = thread.list()
+		} else if inputRequest.path == "/db/api/thread/listPosts/" {
+			result = thread.listPosts()
 		}
 	} else if inputRequest.method == "POST" {
 
@@ -1615,23 +2147,24 @@ type Post struct {
 }
 
 func (p *Post) create() string {
+	fmt.Println("post.create()\t", p.inputRequest)
 	var resp string
-	query := "INSERT INTO post (date, thread, message, user, forum, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+	query := "INSERT INTO post (thread, message, user, forum, date, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
 	// 	ir.url = fmt.Sprintf("%v", r.URL)
 
 	var args []interface{}
 
-	resp, err := validateJson(p.inputRequest, "date", "thread", "message", "user", "forum")
+	resp, err := validateJson(p.inputRequest, "thread", "message", "user", "forum", "date")
 	if err != nil {
 		return resp
 	}
 
-	args = append(args, p.inputRequest.json["date"])
 	args = append(args, p.inputRequest.json["thread"])
 	args = append(args, p.inputRequest.json["message"])
 	args = append(args, p.inputRequest.json["user"])
 	args = append(args, p.inputRequest.json["forum"])
+	args = append(args, p.inputRequest.json["date"])
 
 	result, err := validateBoolParams(p.inputRequest.json, &args, "isApproved", "isHighlighted", "isEdited", "isSpam", "isDeleted")
 	if err != nil {
@@ -1899,6 +2432,7 @@ func (p *Post) getPostDetails() (int, map[string]interface{}) {
 }
 
 func (p *Post) details() string {
+	fmt.Println("post.details()\t", p.inputRequest)
 	var resp string
 	var relatedUser, relatedThread, relatedForum bool
 	if len(p.inputRequest.query["post"]) != 1 {
@@ -1928,8 +2462,11 @@ func (p *Post) details() string {
 
 	if relatedThread {
 		t := Thread{inputRequest: p.inputRequest, db: p.db}
+		t.inputRequest.query["thread"] = t.inputRequest.query["thread"][0:0]
 		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], int64ToString(responseMsg["thread"].(int64)))
 		_, threadDetails := t.getThreadDetails()
+
+		// threadDetails["posts"] = 1
 
 		responseMsg["thread"] = threadDetails
 	}
@@ -1947,6 +2484,7 @@ func (p *Post) details() string {
 	if err != nil {
 		panic(err.Error())
 	}
+	fmt.Println(resp)
 
 	return resp
 }
@@ -2042,12 +2580,19 @@ func (p *Post) getList(query string, order string, args []interface{}) (int, []m
 }
 
 func (p *Post) list() string {
+	fmt.Println("post.list()\t", p.inputRequest)
 	var query, order, resp string
 	f := false
 	var args []interface{}
 
 	// Validate query values
-	if len(p.inputRequest.query["user"]) == 1 {
+	if len(p.inputRequest.query["thread"]) == 1 {
+		query = "SELECT * FROM post WHERE thread = ?"
+		args = append(args, p.inputRequest.query["thread"][0])
+
+		f = true
+	}
+	if len(p.inputRequest.query["user"]) == 1 && f == false {
 		query = "SELECT * FROM post WHERE user = ?"
 		args = append(args, p.inputRequest.query["user"][0])
 
@@ -2082,20 +2627,20 @@ func (p *Post) list() string {
 	// check responseCode
 	if responseCode == 100500 {
 		resp = createInvalidResponse()
-		return resp
 	} else if responseCode == 1 {
-		resp, _ = createResponse(responseCode, responseMsg[0])
-		return resp
+		// E6ANYI KOSTYL`
+		test := make(map[string]interface{})
+		resp, _ = createResponse(0, test)
+		// resp, _ = createResponse(responseCode, responseMsg[0])
+
 	} else if responseCode == 0 {
-		resp, err := createResponseFromArray(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return resp
+		resp, _ = createResponseFromArray(responseCode, responseMsg)
 	} else {
 		resp = createInvalidResponse()
-		return resp
 	}
+
+	fmt.Println(resp)
+	return resp
 }
 
 func (p *Post) remove() string {
@@ -2116,7 +2661,7 @@ func (p *Post) restore() string {
 
 func (p *Post) update() string {
 	var resp string
-	query := "UPDATE post SET message = ?, isEdited = true WHERE id = ?"
+	query := "UPDATE post SET message = ? WHERE id = ?"
 
 	var args []interface{}
 
@@ -2135,7 +2680,7 @@ func (p *Post) update() string {
 	args = append(args, p.inputRequest.json["message"])
 	args = append(args, p.inputRequest.json["post"])
 
-	_, err = execQuery(query, &args, p.db)
+	dbResp, err := execQuery(query, &args, p.db)
 	if err != nil {
 		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
@@ -2146,6 +2691,14 @@ func (p *Post) update() string {
 		}
 
 		return resp
+	}
+
+	if dbResp.rowCount == 0 {
+		query := "UPDATE post SET isEdited = false WHERE id = ?"
+		_, _ = execQuery(query, &args, p.db)
+	} else {
+		query := "UPDATE post SET isEdited = true WHERE id = ?"
+		_, _ = execQuery(query, &args, p.db)
 	}
 
 	p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(threadId)))
@@ -2252,6 +2805,73 @@ func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 	io.WriteString(w, result)
 }
 
+// ==========================
+// Information methods here
+// ==========================
+func statusHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	if inputRequest.method == "GET" {
+		var args []interface{}
+
+		query := "SELECT COUNT(*) count FROM user"
+		dbResp, _ := selectQuery(query, &args, db)
+		respUsers, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+
+		query = "SELECT COUNT(*) count FROM thread"
+		dbResp, _ = selectQuery(query, &args, db)
+		respThreads, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+
+		query = "SELECT COUNT(*) count FROM forum"
+		dbResp, _ = selectQuery(query, &args, db)
+		respForums, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+
+		query = "SELECT COUNT(*) count FROM post"
+		dbResp, _ = selectQuery(query, &args, db)
+		respPosts, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+
+		responseCode := 0
+		responseMsg := map[string]interface{}{
+			"user":   respUsers,
+			"thread": respThreads,
+			"forum":  respForums,
+			"post":   respPosts,
+		}
+		resp, _ := createResponse(responseCode, responseMsg)
+
+		io.WriteString(w, resp)
+	}
+}
+
+func clearHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	if inputRequest.method == "POST" {
+		var args []interface{}
+
+		query := "DELETE FROM follow"
+		_, _ = execQuery(query, &args, db)
+		query = "DELETE FROM subscribe"
+		_, _ = execQuery(query, &args, db)
+
+		query = "DELETE FROM post WHERE id > 0"
+		_, _ = execQuery(query, &args, db)
+		query = "DELETE FROM thread WHERE id > 0"
+		_, _ = execQuery(query, &args, db)
+		query = "DELETE FROM forum WHERE id > 0"
+		_, _ = execQuery(query, &args, db)
+		query = "DELETE FROM user WHERE id > 0"
+		_, _ = execQuery(query, &args, db)
+
+		responseCode := 0
+
+		cacheContent := map[string]interface{}{
+			"code":     responseCode,
+			"response": "OK",
+		}
+
+		str, _ := json.Marshal(cacheContent)
+
+		io.WriteString(w, string(str))
+	}
+}
+
 // =================
 // Main here
 // =================
@@ -2287,6 +2907,8 @@ func main() {
 	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
 	http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
 	http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
+	http.HandleFunc("/db/api/status/", makeHandler(db, statusHandler))
+	http.HandleFunc("/db/api/clear/", makeHandler(db, clearHandler))
 
 	http.ListenAndServe(PORT, nil)
 }
