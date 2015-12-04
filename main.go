@@ -12,7 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"technopark-db/response"
+	rs "technopark-db/response"
 
 	mysql "github.com/go-sql-driver/mysql"
 )
@@ -45,12 +45,27 @@ func (ir *InputRequest) parse(r *http.Request) {
 }
 
 func createResponse(code int, response map[string]interface{}) (string, error) {
-	cacheContent := map[string]interface{}{
+	content := map[string]interface{}{
 		"code":     code,
 		"response": response,
 	}
 
-	str, err := json.Marshal(cacheContent)
+	str, err := json.Marshal(content)
+	if err != nil {
+		fmt.Println("Error encoding JSON")
+		return "", err
+	}
+
+	return string(str), nil
+}
+
+func _createResponse(code int, response rs.RespStruct) (string, error) {
+	content := map[string]interface{}{
+		"code":     code,
+		"response": response,
+	}
+
+	str, err := json.Marshal(content)
 	if err != nil {
 		fmt.Println("Error encoding JSON")
 		return "", err
@@ -128,6 +143,18 @@ func createInvalidQuery() string {
 	return resp
 }
 
+func createInvalidJsonResponse() string {
+	responseCode := 3
+	errorMessage := map[string]interface{}{"msg": "Invalid json"}
+
+	resp, err := createResponse(responseCode, errorMessage)
+	if err != nil {
+		panic(err)
+	}
+
+	return resp
+}
+
 func checkError1062(err error) bool {
 	if driverErr, ok := err.(*mysql.MySQLError); ok { // Now the error number is accessible directly
 		if driverErr.Number == 1062 {
@@ -191,6 +218,30 @@ func validateBoolParams(json map[string]interface{}, args *[]interface{}, params
 	}
 
 	return resp, nil
+}
+
+type Args struct {
+	data []interface{}
+}
+
+func (args *Args) generateFromJson(json *map[string]interface{}, params ...string) {
+	for _, value := range params {
+		args.data = append(args.data, (*json)[value])
+	}
+}
+
+func (args *Args) addFromJson(json *map[string]interface{}, params ...string) {
+	for _, value := range params {
+		args.data = append(args.data, (*json)[value])
+	}
+}
+
+func (args *Args) add(newData interface{}) {
+	args.data = append(args.data, newData)
+}
+
+func (args *Args) clear() {
+	args.data = args.data[0:0]
 }
 
 // ======================
@@ -338,34 +389,29 @@ type User struct {
 
 func (u *User) create() string {
 	var resp string
+	args := Args{}
+
 	query := "INSERT INTO user (username, about, name, email, isAnonymous) VALUES(?, ?, ?, ?, ?)"
 
-	var args []interface{}
-
-	// resp, err := validateJson(u.inputRequest, "username", "about", "name", "email")
 	resp, err := validateJson(u.inputRequest, "email")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse()
 	}
 
-	args = append(args, u.inputRequest.json["username"])
-	args = append(args, u.inputRequest.json["about"])
-	args = append(args, u.inputRequest.json["name"])
-	args = append(args, u.inputRequest.json["email"])
+	args.generateFromJson(&u.inputRequest.json, "username", "about", "name", "email")
 
 	// Validate isAnonymous param
 	isAnonymous := u.inputRequest.json["isAnonymous"]
 	if isAnonymous == nil {
-		args = append(args, false)
+		args.add(false)
 	} else {
 		if isAnonymous != false && isAnonymous != true {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
-		args = append(args, isAnonymous)
+		args.addFromJson(&u.inputRequest.json, "isAnonymous")
 	}
 
-	dbResp, err := execQuery(query, &args, u.db)
+	dbResp, err := execQuery(query, &args.data, u.db)
 	if err != nil {
 		responseCode, errorMessage := errorExecParse(err)
 
@@ -378,26 +424,24 @@ func (u *User) create() string {
 	}
 
 	query = "SELECT * FROM user WHERE id = ?"
-	args = args[0:0]
-	args = append(args, dbResp.lastId)
-	newUser, err := selectQuery(query, &args, u.db)
+	args.clear()
+	args.add(dbResp.lastId)
+	newUser, err := selectQuery(query, &args.data, u.db)
 	if err != nil {
 		panic(err)
 	}
 
-	respIsAnonymous, _ := strconv.ParseBool(newUser.values[0]["isAnonymous"])
-
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"about":       newUser.values[0]["about"],
-		"email":       newUser.values[0]["email"],
-		"id":          dbResp.lastId,
-		"isAnonymous": respIsAnonymous,
-		"name":        newUser.values[0]["name"],
-		"username":    newUser.values[0]["username"],
+	responseMsg := &rs.UserCreate{
+		About:       newUser.values[0]["about"],
+		Email:       newUser.values[0]["email"],
+		Id:          dbResp.lastId,
+		IsAnonymous: stringToBool(newUser.values[0]["isAnonymous"]),
+		Name:        newUser.values[0]["name"],
+		Username:    newUser.values[0]["username"],
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -3008,10 +3052,21 @@ func fromBase95(value string) int {
 	return result
 }
 
+func stringToBool(inputString string) (result bool) {
+	result, err := strconv.ParseBool(inputString)
+
+	if err != nil {
+		panic(err)
+	}
+
+	return
+}
+
 // =================
 // Future here
 // =================
 
+/*
 func testArrayJson(code int, response []response.Foo) string {
 	cacheContent := map[string]interface{}{
 		"code":     code,
@@ -3031,3 +3086,4 @@ func testJson(code int, response response.Foo) string {
 
 	return string(result)
 }
+*/

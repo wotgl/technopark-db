@@ -31,3 +31,6 @@ TODO
 
 # Feature modules
 modules/*
+
+# Log
+*.log
