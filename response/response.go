@@ -124,6 +124,12 @@ type ForumCreate struct {
 
 func (instance *ForumCreate) Foo() bool { return true }
 
+type ThreadBoolBasic struct {
+	Thread float64 `json:"thread"`
+}
+
+func (instance *ThreadBoolBasic) Foo() bool { return true }
+
 type ThreadOpen struct {
 	Thread int64 `json:"thread"`
 }
@@ -232,12 +238,12 @@ type ThreadCreate struct {
 	Forum     string `json:"forum"`
 	Title     string `json:"title"`
 	Slug      string `json:"slug"`
-	Isclosed  bool   `json:"isClosed"`
+	IsClosed  bool   `json:"isClosed"`
 	User      string `json:"user"`
 	Date      string `json:"date"`
 	Message   string `json:"message"`
 	Id        int64  `json:"id"`
-	Isdeleted bool   `json:"isDeleted"`
+	IsDeleted bool   `json:"isDeleted"`
 }
 
 func (instance *ThreadCreate) Foo() bool { return true }

@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -16,6 +17,20 @@ import (
 
 	mysql "github.com/go-sql-driver/mysql"
 )
+
+func initLog() {
+	fmt.Println("Hey, initLog() here")
+	f, err := os.OpenFile("main2.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	log.SetOutput(f)
+
+	for {
+	}
+}
 
 type InputRequest struct {
 	method string
@@ -90,6 +105,7 @@ func createResponseFromArray(code int, response []map[string]interface{}) (strin
 }
 
 func errorExecParse(err error) (int, map[string]interface{}) {
+	log.Println("Error:\t", err)
 	if driverErr, ok := err.(*mysql.MySQLError); ok { // Now the error number is accessible directly
 		var responseCode int
 		var errorMessage map[string]interface{}
@@ -105,7 +121,7 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 			errorMessage = map[string]interface{}{"msg": "Exist [Error 1452]"}
 
 		default:
-			fmt.Println("errorExecParse() default")
+			// fmt.Println("errorExecParse() default")
 			panic(err.Error())
 			responseCode = 4
 			errorMessage = map[string]interface{}{"msg": "Unknown Error"}
@@ -143,7 +159,7 @@ func createInvalidQuery() string {
 	return resp
 }
 
-func createInvalidJsonResponse() string {
+func createInvalidJsonResponse(json *map[string]interface{}) string {
 	responseCode := 3
 	errorMessage := map[string]interface{}{"msg": "Invalid json"}
 
@@ -151,6 +167,8 @@ func createInvalidJsonResponse() string {
 	if err != nil {
 		panic(err)
 	}
+
+	log.Println("Invalid JSON\t", json)
 
 	return resp
 }
@@ -236,7 +254,7 @@ func (args *Args) addFromJson(json *map[string]interface{}, params ...string) {
 	}
 }
 
-func (args *Args) add(newData interface{}) {
+func (args *Args) append(newData interface{}) {
 	args.data = append(args.data, newData)
 }
 
@@ -395,7 +413,7 @@ func (u *User) create() string {
 
 	resp, err := validateJson(u.inputRequest, "email")
 	if err != nil {
-		return createInvalidJsonResponse()
+		return createInvalidJsonResponse(&u.inputRequest.json)
 	}
 
 	args.generateFromJson(&u.inputRequest.json, "username", "about", "name", "email")
@@ -403,7 +421,7 @@ func (u *User) create() string {
 	// Validate isAnonymous param
 	isAnonymous := u.inputRequest.json["isAnonymous"]
 	if isAnonymous == nil {
-		args.add(false)
+		args.append(false)
 	} else {
 		if isAnonymous != false && isAnonymous != true {
 			return createInvalidResponse()
@@ -425,7 +443,7 @@ func (u *User) create() string {
 
 	query = "SELECT * FROM user WHERE id = ?"
 	args.clear()
-	args.add(dbResp.lastId)
+	args.append(dbResp.lastId)
 	newUser, err := selectQuery(query, &args.data, u.db)
 	if err != nil {
 		panic(err)
@@ -446,7 +464,7 @@ func (u *User) create() string {
 		panic(err.Error())
 	}
 
-	fmt.Println("user.create()")
+	log.Printf("User '%s' created", responseMsg.Email)
 
 	return resp
 }
@@ -838,25 +856,20 @@ type Forum struct {
 }
 
 func (f *Forum) create() string {
-	fmt.Println("create\t", f.inputRequest)
 	var resp string
-	query := "INSERT INTO forum (name, short_name, user) VALUES(?, ?, ?)"
+	args := Args{}
 
-	var args []interface{}
+	query := "INSERT INTO forum (name, short_name, user) VALUES(?, ?, ?)"
 
 	resp, err := validateJson(f.inputRequest, "name", "short_name", "user")
 	if err != nil {
-		fmt.Println(err)
-		return resp
+		return createInvalidJsonResponse(&f.inputRequest.json)
 	}
 
-	args = append(args, f.inputRequest.json["name"])
-	args = append(args, f.inputRequest.json["short_name"])
-	args = append(args, f.inputRequest.json["user"])
+	args.generateFromJson(&f.inputRequest.json, "name", "short_name", "user")
 
-	dbResp, err := execQuery(query, &args, f.db)
+	dbResp, err := execQuery(query, &args.data, f.db)
 	if err != nil {
-		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
 
 		resp, err = createResponse(responseCode, errorMessage)
@@ -868,27 +881,27 @@ func (f *Forum) create() string {
 	}
 
 	query = "SELECT * FROM forum WHERE id = ?"
-	args = args[0:0]
-	args = append(args, dbResp.lastId)
-	newForum, err := selectQuery(query, &args, f.db)
+	args.clear()
+	args.append(dbResp.lastId)
+	newForum, err := selectQuery(query, &args.data, f.db)
 	if err != nil {
 		panic(err)
 	}
 
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"name":       newForum.values[0]["name"],
-		"short_name": newForum.values[0]["short_name"],
-		"id":         dbResp.lastId,
-		"user":       newForum.values[0]["user"],
+	responseMsg := &rs.ForumCreate{
+		Name:       newForum.values[0]["name"],
+		Short_Name: newForum.values[0]["short_name"],
+		Id:         dbResp.lastId,
+		User:       newForum.values[0]["user"],
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	fmt.Println("forum.create()")
+	log.Printf("Forum '%s' created", responseMsg.Short_Name)
 
 	return resp
 }
@@ -1324,27 +1337,24 @@ type Thread struct {
 
 func (t *Thread) updateBoolBasic(query string, value bool) string {
 	var resp string
-
-	var args []interface{}
+	args := Args{}
 
 	resp, err := validateJson(t.inputRequest, "thread")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidResponse()
 	}
 
 	threadId := t.inputRequest.json["thread"].(float64)
 
-	args = append(args, value)
-	args = append(args, t.inputRequest.json["thread"])
+	args.append(value)
+	args.append(threadId)
 
-	dbResp, err := execQuery(query, &args, t.db)
+	dbResp, err := execQuery(query, &args.data, t.db)
 	if err != nil {
-		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
 
 		resp, err = createResponse(responseCode, errorMessage)
@@ -1372,11 +1382,11 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 	}
 
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": threadId,
+	responseMsg := &rs.ThreadBoolBasic{
+		Thread: threadId,
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -1394,38 +1404,30 @@ func (t *Thread) close() string {
 
 func (t *Thread) create() string {
 	var resp string
-	query := "INSERT INTO thread (forum, title, isClosed, user, date, message, slug, isDeleted) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
+	args := Args{}
 
-	var args []interface{}
+	query := "INSERT INTO thread (forum, title, isClosed, user, date, message, slug, isDeleted) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
 
 	resp, err := validateJson(t.inputRequest, "forum", "title", "isClosed", "user", "date", "message", "slug")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
-	args = append(args, t.inputRequest.json["forum"])
-	args = append(args, t.inputRequest.json["title"])
-	args = append(args, t.inputRequest.json["isClosed"])
-	args = append(args, t.inputRequest.json["user"])
-	args = append(args, t.inputRequest.json["date"])
-	args = append(args, t.inputRequest.json["message"])
-	args = append(args, t.inputRequest.json["slug"])
+	args.generateFromJson(&t.inputRequest.json, "forum", "title", "isClosed", "user", "date", "message", "slug")
 
 	// Validate isDeleted param
 	isDeleted := t.inputRequest.json["isDeleted"]
 	if isDeleted == nil {
-		args = append(args, false)
+		args.append(false)
 	} else {
 		if isDeleted != false && isDeleted != true {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
-		args = append(args, isDeleted)
+		args.append(isDeleted)
 	}
 
-	dbResp, err := execQuery(query, &args, t.db)
+	dbResp, err := execQuery(query, &args.data, t.db)
 	if err != nil {
-		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
 
 		resp, err = createResponse(responseCode, errorMessage)
@@ -1437,35 +1439,32 @@ func (t *Thread) create() string {
 	}
 
 	query = "SELECT * FROM thread WHERE id = ?"
-	args = args[0:0]
-	args = append(args, dbResp.lastId)
-	newThread, err := selectQuery(query, &args, t.db)
+	args.clear()
+	args.append(dbResp.lastId)
+	newThread, err := selectQuery(query, &args.data, t.db)
 	if err != nil {
 		panic(err)
 	}
 
-	respIsClosed, _ := strconv.ParseBool(newThread.values[0]["isClosed"])
-	respIsDeleted, _ := strconv.ParseBool(newThread.values[0]["isDeleted"])
-
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"forum":     newThread.values[0]["forum"],
-		"title":     newThread.values[0]["title"],
-		"id":        dbResp.lastId,
-		"user":      newThread.values[0]["user"],
-		"date":      newThread.values[0]["date"],
-		"message":   newThread.values[0]["message"],
-		"slug":      newThread.values[0]["slug"],
-		"isClosed":  respIsClosed,
-		"isDeleted": respIsDeleted,
+	responseMsg := &rs.ThreadCreate{
+		Forum:     newThread.values[0]["forum"],
+		Title:     newThread.values[0]["title"],
+		Id:        dbResp.lastId,
+		User:      newThread.values[0]["user"],
+		Date:      newThread.values[0]["date"],
+		Message:   newThread.values[0]["message"],
+		Slug:      newThread.values[0]["slug"],
+		IsClosed:  stringToBool(newThread.values[0]["isClosed"]),
+		IsDeleted: stringToBool(newThread.values[0]["isDeleted"]),
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	fmt.Println("thread.create()")
+	log.Printf("Thread '#%d' created", responseMsg.Id)
 
 	return resp
 }
@@ -1911,24 +1910,22 @@ func (t *Thread) restore() string {
 
 func (t *Thread) subscribe() string {
 	var resp string
-	query := "INSERT INTO subscribe (thread, user) VALUES(?, ?)"
+	args := Args{}
 
-	var args []interface{}
+	query := "INSERT INTO subscribe (thread, user) VALUES(?, ?)"
 
 	resp, err := validateJson(t.inputRequest, "thread", "user")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
-	args = append(args, t.inputRequest.json["thread"])
-	args = append(args, t.inputRequest.json["user"])
+	args.generateFromJson(&t.inputRequest.json, "thread", "user")
 
-	_, err = execQuery(query, &args, t.db)
+	_, err = execQuery(query, &args.data, t.db)
 	if err != nil {
 		fmt.Println(err)
 
@@ -1956,43 +1953,40 @@ func (t *Thread) subscribe() string {
 	// else return info
 
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": int(t.inputRequest.json["thread"].(float64)),
-		"user":   t.inputRequest.json["user"],
+	responseMsg := &rs.ThreadSubscribe{
+		Thread: int64(t.inputRequest.json["thread"].(float64)),
+		User:   t.inputRequest.json["user"].(string),
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
 
-	fmt.Println("thread.subscribe()")
+	log.Printf("User '%s' subscribe to thread '#%d'", responseMsg.User, responseMsg.Thread)
 
 	return resp
 }
 
 func (t *Thread) unsubscribe() string {
 	var resp string
-	query := "DELETE FROM subscribe WHERE thread = ? AND user = ?"
+	args := Args{}
 
-	var args []interface{}
+	query := "DELETE FROM subscribe WHERE thread = ? AND user = ?"
 
 	resp, err := validateJson(t.inputRequest, "thread", "user")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
-	args = append(args, t.inputRequest.json["thread"])
-	args = append(args, t.inputRequest.json["user"])
+	args.generateFromJson(&t.inputRequest.json, "thread", "user")
 
-	dbResp, err := execQuery(query, &args, t.db)
+	dbResp, err := execQuery(query, &args.data, t.db)
 	if err != nil {
-		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
 
 		resp, err = createResponse(responseCode, errorMessage)
@@ -2014,42 +2008,41 @@ func (t *Thread) unsubscribe() string {
 	}
 
 	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"thread": int(t.inputRequest.json["thread"].(float64)),
-		"user":   t.inputRequest.json["user"],
+	responseMsg := &rs.ThreadSubscribe{
+		Thread: int64(t.inputRequest.json["thread"].(float64)),
+		User:   t.inputRequest.json["user"].(string),
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
+
+	log.Printf("User '%s' unsubscribe from thread '#%d'", responseMsg.User, responseMsg.Thread)
 
 	return resp
 }
 
 func (t *Thread) update() string {
 	var resp string
-	query := "UPDATE thread SET message = ?, slug = ? WHERE id = ?"
+	args := Args{}
 
-	var args []interface{}
+	query := "UPDATE thread SET message = ?, slug = ? WHERE id = ?"
 
 	resp, err := validateJson(t.inputRequest, "thread", "message", "slug")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	threadId := t.inputRequest.json["thread"].(float64)
 
-	args = append(args, t.inputRequest.json["message"])
-	args = append(args, t.inputRequest.json["slug"])
-	args = append(args, t.inputRequest.json["thread"])
+	args.generateFromJson(&t.inputRequest.json, "message", "slug", "thread")
 
-	_, err = execQuery(query, &args, t.db)
+	_, err = execQuery(query, &args.data, t.db)
 	if err != nil {
 		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
@@ -2080,17 +2073,15 @@ func (t *Thread) update() string {
 func (t *Thread) vote() string {
 	var resp string
 	var query string
-
-	var args []interface{}
+	args := Args{}
 
 	resp, err := validateJson(t.inputRequest, "thread", "vote")
 	if err != nil {
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	if checkFloat64Type(t.inputRequest.json["thread"]) == false || checkFloat64Type(t.inputRequest.json["vote"]) == false {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	threadId := t.inputRequest.json["thread"].(float64)
@@ -2101,13 +2092,12 @@ func (t *Thread) vote() string {
 	} else if vote == -1 {
 		query = "UPDATE thread SET dislikes = dislikes + 1, points = points - 1 WHERE id = ?"
 	} else {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
-	args = append(args, t.inputRequest.json["thread"])
+	args.append(threadId)
 
-	_, err = execQuery(query, &args, t.db)
+	_, err = execQuery(query, &args.data, t.db)
 	if err != nil {
 		fmt.Println(err)
 		responseCode, errorMessage := errorExecParse(err)
@@ -2946,6 +2936,8 @@ func main() {
 	PORT := ":8000"
 
 	fmt.Printf("The server is running on http://localhost%s\n", PORT)
+
+	// go initLog()
 
 	http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
 	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
