@@ -31,19 +31,26 @@ type UserFollow struct {
 
 func (instance *UserFollow) Foo() bool { return true }
 
+// pointer to string is made for null values
 type UserDetails struct {
-	Username      string      `json:"username"`
-	About         string      `json:"about"`
-	Name          string      `json:"name"`
+	Username      *string     `json:"username"`
+	About         *string     `json:"about"`
+	Name          *string     `json:"name"`
 	Subscriptions interface{} `json:"subscriptions"`
 	Id            int64       `json:"id"`
 	Followers     interface{} `json:"followers"`
 	Following     interface{} `json:"following"`
-	Isanonymous   bool        `json:"isAnonymous"`
+	IsAnonymous   bool        `json:"isAnonymous"`
 	Email         string      `json:"email"`
 }
 
 func (instance *UserDetails) Foo() bool { return true }
+
+type UserListBasic struct {
+	Users []UserDetails
+}
+
+func (instance *UserListBasic) Foo() bool { return true }
 
 type UserListFollowing struct {
 	Users []UserDetails
@@ -294,6 +301,12 @@ type PostDetails struct {
 
 func (instance *PostDetails) Foo() bool { return true }
 
+type PostBoolBasic struct {
+	Post float64 `json:"post"`
+}
+
+func (instance *PostBoolBasic) Foo() bool { return true }
+
 type PostRemove struct {
 	Post int64 `json:"post"`
 }
@@ -342,3 +355,9 @@ type PostCreate struct {
 }
 
 func (instance *PostCreate) Foo() bool { return true }
+
+type ErrorMsg struct {
+	Msg string `json:"msg"`
+}
+
+func (instance *ErrorMsg) Foo() bool { return true }
