@@ -108,7 +108,7 @@ type ForumListThreads struct {
 func (instance *ForumListThreads) Foo() bool { return true }
 
 type ForumDetails struct {
-	User       UserDetails `json:"user"`
+	User       interface{} `json:"user"`
 	Id         int64       `json:"id"`
 	Short_Name string      `json:"short_name"`
 	Name       string      `json:"name"`
@@ -144,19 +144,19 @@ type ThreadOpen struct {
 func (instance *ThreadOpen) Foo() bool { return true }
 
 type ThreadUpdate struct {
-	Forum     string `json:"forum"`
-	Title     string `json:"title"`
-	Posts     int64  `json:"posts"`
-	Dislikes  int64  `json:"dislikes"`
-	Slug      string `json:"slug"`
-	Isclosed  bool   `json:"isClosed"`
-	Points    int64  `json:"points"`
-	Likes     int64  `json:"likes"`
-	Date      string `json:"date"`
-	Message   string `json:"message"`
-	Id        int64  `json:"id"`
-	Isdeleted bool   `json:"isDeleted"`
-	User      string `json:"user"`
+	Forum     interface{} `json:"forum"`
+	Title     string      `json:"title"`
+	Posts     int64       `json:"posts"`
+	Dislikes  int64       `json:"dislikes"`
+	Slug      string      `json:"slug"`
+	Isclosed  bool        `json:"isClosed"`
+	Points    int64       `json:"points"`
+	Likes     int64       `json:"likes"`
+	Date      string      `json:"date"`
+	Message   string      `json:"message"`
+	Id        int64       `json:"id"`
+	Isdeleted bool        `json:"isDeleted"`
+	User      interface{} `json:"user"`
 }
 
 func (instance *ThreadUpdate) Foo() bool { return true }
@@ -175,19 +175,19 @@ type ThreadRestore struct {
 func (instance *ThreadRestore) Foo() bool { return true }
 
 type ThreadDetails struct {
-	Forum     string `json:"forum"`
-	Title     string `json:"title"`
-	Posts     int64  `json:"posts"`
-	Dislikes  int64  `json:"dislikes"`
-	Slug      string `json:"slug"`
-	Isclosed  bool   `json:"isClosed"`
-	Points    int64  `json:"points"`
-	Likes     int64  `json:"likes"`
-	Date      string `json:"date"`
-	Message   string `json:"message"`
-	Id        int64  `json:"id"`
-	Isdeleted bool   `json:"isDeleted"`
-	User      string `json:"user"`
+	Forum     interface{} `json:"forum"`
+	Title     string      `json:"title"`
+	Posts     int64       `json:"posts"`
+	Dislikes  int64       `json:"dislikes"`
+	Slug      string      `json:"slug"`
+	IsClosed  bool        `json:"isClosed"`
+	Points    int64       `json:"points"`
+	Likes     int64       `json:"likes"`
+	Date      string      `json:"date"`
+	Message   string      `json:"message"`
+	Id        int64       `json:"id"`
+	IsDeleted bool        `json:"isDeleted"`
+	User      interface{} `json:"user"`
 }
 
 func (instance *ThreadDetails) Foo() bool { return true }

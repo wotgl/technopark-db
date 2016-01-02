@@ -147,6 +147,17 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 	panic(err.Error()) // proper error handling instead of panic in your app
 }
 
+func createErrorResponse(err error) string {
+	responseCode, errorMessage := errorExecParse(err)
+
+	resp, err := createResponse(responseCode, errorMessage)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return resp
+}
+
 func createNotFoundForArray() string {
 	var resp string
 	responseCode := 1
@@ -164,7 +175,9 @@ func createNotFoundForArray() string {
 
 func createInvalidQuery() string {
 	responseCode := 3
-	errorMessage := map[string]interface{}{"msg": "Invalid query"}
+	errorMessage := map[string]interface{}{
+		"msg": "Invalid query",
+	}
 
 	resp, err := createResponse(responseCode, errorMessage)
 	if err != nil {
@@ -219,6 +232,14 @@ func createNotExistResponse() string {
 	if err != nil {
 		log.Panic(err)
 	}
+
+	return resp
+}
+
+// KOSTYL` API
+func becauseFuckU() string {
+	kostyl := make(map[string]interface{})
+	resp, _ := createResponse(0, kostyl)
 
 	return resp
 }
@@ -457,14 +478,7 @@ func (u *User) create() string {
 
 	dbResp, err := execQuery(query, &args.data, u.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	query = "SELECT * FROM user WHERE id = ?"
@@ -852,12 +866,11 @@ func (u *User) listPosts() string {
 
 // +
 func (u *User) unfollow() string {
-	var resp string
 	query := "DELETE FROM follow WHERE follower = ? AND followee = ?"
 
 	args := Args{}
 
-	resp, err := validateJson(u.inputRequest, "follower", "followee")
+	_, err := validateJson(u.inputRequest, "follower", "followee")
 	if err != nil {
 		return createInvalidJsonResponse(&u.inputRequest.json)
 	}
@@ -866,14 +879,7 @@ func (u *User) unfollow() string {
 
 	_, err = execQuery(query, &args.data, u.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	clearQuery(&u.inputRequest.query)
@@ -883,12 +889,11 @@ func (u *User) unfollow() string {
 
 // +
 func (u *User) updateProfile() string {
-	var resp string
 	query := "UPDATE user SET about = ?, name = ? WHERE email =  ?"
 
 	args := Args{}
 
-	resp, err := validateJson(u.inputRequest, "about", "name", "user")
+	_, err := validateJson(u.inputRequest, "about", "name", "user")
 	if err != nil {
 		return createInvalidJsonResponse(&u.inputRequest.json)
 	}
@@ -897,14 +902,7 @@ func (u *User) updateProfile() string {
 
 	_, err = execQuery(query, &args.data, u.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	clearQuery(&u.inputRequest.query)
@@ -953,6 +951,7 @@ type Forum struct {
 	db           *sql.DB
 }
 
+// +
 func (f *Forum) create() string {
 	var resp string
 	args := Args{}
@@ -968,14 +967,7 @@ func (f *Forum) create() string {
 
 	dbResp, err := execQuery(query, &args.data, f.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	query = "SELECT * FROM forum WHERE id = ?"
@@ -1002,6 +994,33 @@ func (f *Forum) create() string {
 	log.Printf("Forum '%s' created", responseMsg.Short_Name)
 
 	return resp
+}
+
+// +
+func (f *Forum) _getForumDetails(args Args) (int, *rs.ForumDetails) {
+	query := "SELECT * FROM forum WHERE short_name = ?"
+
+	getForum, err := selectQuery(query, &args.data, f.db)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if getForum.rows == 0 {
+		responseCode := 1
+		errorMessage := &rs.ForumDetails{}
+
+		return responseCode, errorMessage
+	}
+
+	responseCode := 0
+	responseMsg := &rs.ForumDetails{
+		Id:         stringToInt64(getForum.values[0]["id"]),
+		Short_Name: getForum.values[0]["short_name"],
+		Name:       getForum.values[0]["name"],
+		User:       getForum.values[0]["user"],
+	}
+
+	return responseCode, responseMsg
 }
 
 func (f *Forum) getForumDetails() (int, map[string]interface{}) {
@@ -1034,29 +1053,36 @@ func (f *Forum) getForumDetails() (int, map[string]interface{}) {
 	return responseCode, responseMsg
 }
 
+// +
 func (f *Forum) details() string {
 	var resp string
 	var relatedUser bool
-	if len(f.inputRequest.query["forum"]) != 1 {
-		resp = createInvalidResponse()
-		return resp
-	}
 
+	args := Args{}
+
+	if len(f.inputRequest.query["forum"]) != 1 {
+		return createInvalidResponse()
+	}
 	if len(f.inputRequest.query["related"]) == 1 && f.inputRequest.query["related"][0] == "user" {
 		relatedUser = true
 	}
 
-	responseCode, responseMsg := f.getForumDetails()
+	args.append(f.inputRequest.query["forum"][0])
+
+	responseCode, responseMsg := f._getForumDetails(args)
 
 	if relatedUser {
 		u := User{inputRequest: f.inputRequest, db: f.db}
-		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], responseMsg["user"].(string))
-		_, userDetails := u.getUserDetails()
+		clearQuery(&u.inputRequest.query)
+		args := Args{}
+		args.append(responseMsg.User.(string))
 
-		responseMsg["user"] = userDetails
+		_, userDetails := u._getUserDetails(args)
+
+		responseMsg.User = userDetails
 	}
 
-	resp, err := createResponse(responseCode, responseMsg)
+	resp, err := _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -1310,69 +1336,60 @@ func (f *Forum) listPosts() string {
 }
 
 func (f *Forum) listUsers() string {
-	var resp, query string
-	var args []interface{}
+	var resp string
+	args := Args{}
+
+	query := "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
 
 	// Validate query values
-	if len(f.inputRequest.query["forum"]) == 1 {
-		query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
-		args = append(args, f.inputRequest.query["forum"][0])
-	} else {
-		resp = createInvalidResponse()
-		return resp
+	if len(f.inputRequest.query["forum"]) != 1 {
+		return createInvalidResponse()
 	}
+
+	args.append(f.inputRequest.query["forum"][0])
 
 	// Check and validate optional params
 	if len(f.inputRequest.query["since_id"]) >= 1 {
 		query += " AND u.id >= ?"
-		args = append(args, f.inputRequest.query["since_id"][0])
+		args.append(f.inputRequest.query["since_id"][0])
 	}
 
 	if len(f.inputRequest.query["order"]) >= 1 {
 		orderType := f.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
 
-		// query += " ORDER BY u.name desc"
 		query += fmt.Sprintf(" ORDER BY u.name %s", orderType)
 	} else {
 		query += " ORDER BY u.name desc"
 	}
+
 	if len(f.inputRequest.query["limit"]) >= 1 {
-		limitValue := f.inputRequest.query["limit"][0]
-		i, err := strconv.Atoi(limitValue)
+		i, err := strconv.Atoi(f.inputRequest.query["limit"][0])
 		if err != nil || i < 0 {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
 		query += fmt.Sprintf(" LIMIT %d", i)
 	}
 
-	fmt.Println(query)
-
-	getUser, err := selectQuery(query, &args, f.db)
+	users, err := selectQuery(query, &args.data, f.db)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	fmt.Println(getUser)
-
-	if getUser.rows == 0 {
+	if users.rows == 0 {
 		// E6ANYI KOSTYL`
 		test := make(map[string]interface{})
 		resp, _ = createResponse(0, test)
 
 		return resp
-		return createNotFoundForArray()
 	}
 
 	responseCode := 0
 	var responseMsg []map[string]interface{}
 
-	for _, value := range getUser.values {
-		fmt.Println(value)
+	for _, value := range users.values {
 		u := User{inputRequest: f.inputRequest, db: f.db}
 		u.inputRequest.query["user"] = u.inputRequest.query["user"][0:0]
 		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], value["user"])
@@ -1428,6 +1445,7 @@ type Thread struct {
 	db           *sql.DB
 }
 
+// +
 func (t *Thread) updateBoolBasic(query string, value bool) string {
 	var resp string
 	args := Args{}
@@ -1438,7 +1456,7 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 	}
 
 	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
-		return createInvalidResponse()
+		return createInvalidJsonResponse(&t.inputRequest.json)
 	}
 
 	threadId := t.inputRequest.json["thread"].(float64)
@@ -1447,14 +1465,7 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 
 	dbResp, err := execQuery(query, &args.data, t.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	if dbResp.rowCount == 0 {
@@ -1462,8 +1473,7 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 		responseCode, responseMsg := t.getThreadDetails()
 
 		if responseCode != 0 {
-			resp = createNotExistResponse()
-			return resp
+			return createNotExistResponse()
 		}
 
 		resp, err = createResponse(responseCode, responseMsg)
@@ -1486,6 +1496,7 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 	return resp
 }
 
+// +
 func (t *Thread) close() string {
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
@@ -1494,6 +1505,7 @@ func (t *Thread) close() string {
 	return resp
 }
 
+// +
 func (t *Thread) create() string {
 	var resp string
 	args := Args{}
@@ -1520,14 +1532,7 @@ func (t *Thread) create() string {
 
 	dbResp, err := execQuery(query, &args.data, t.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	query = "SELECT * FROM thread WHERE id = ?"
@@ -1561,6 +1566,45 @@ func (t *Thread) create() string {
 	return resp
 }
 
+// Rewrite subquery
+// +
+func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
+	// query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"		// FIX
+	query := "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = ? AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
+
+	getThread, err := selectQuery(query, &args.data, t.db)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if getThread.rows == 0 {
+		responseCode := 1
+		errorMessage := &rs.ThreadDetails{}
+
+		return responseCode, errorMessage
+	}
+
+	responseCode := 0
+	responseMsg := &rs.ThreadDetails{
+		Date:      getThread.values[0]["date"],
+		Dislikes:  stringToInt64(getThread.values[0]["dislikes"]),
+		Forum:     getThread.values[0]["forum"],
+		Id:        stringToInt64(getThread.values[0]["id"]),
+		IsClosed:  stringToBool(getThread.values[0]["isClosed"]),
+		IsDeleted: stringToBool(getThread.values[0]["isDeleted"]),
+		Likes:     stringToInt64(getThread.values[0]["likes"]),
+		Message:   getThread.values[0]["message"],
+		Points:    stringToInt64(getThread.values[0]["points"]),
+		Posts:     stringToInt64(getThread.values[0]["posts"]),
+		Slug:      getThread.values[0]["slug"],
+		Title:     getThread.values[0]["title"],
+		User:      getThread.values[0]["user"],
+	}
+
+	return responseCode, responseMsg
+}
+
+// Rewrite subquery
 func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 	// query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"		// FIX
 	query := "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = ? AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
@@ -1603,6 +1647,47 @@ func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
 		"slug":      getThread.values[0]["slug"],
 		"title":     getThread.values[0]["title"],
 		"user":      getThread.values[0]["user"],
+	}
+
+	return responseCode, responseMsg
+}
+
+// +
+func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.ThreadList) {
+	getThread, err := selectQuery(query, &args.data, t.db)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if getThread.rows == 0 {
+		responseCode := 1
+		errorMessage := &rs.ThreadList{}
+
+		return responseCode, errorMessage
+	}
+
+	responseCode := 0
+	responseArray := make([]rs.ThreadDetails, 0)
+	responseMsg := &rs.ThreadList{Threads: responseArray}
+
+	for _, value := range getThread.values {
+		tempMsg := &rs.ThreadDetails{
+			Date:      value["date"],
+			Dislikes:  stringToInt64(value["dislikes"]),
+			Forum:     value["forum"],
+			Id:        stringToInt64(value["id"]),
+			IsClosed:  stringToBool(value["isClosed"]),
+			IsDeleted: stringToBool(value["isDeleted"]),
+			Likes:     stringToInt64(value["likes"]),
+			Message:   value["message"],
+			Points:    stringToInt64(value["points"]),
+			Posts:     stringToInt64(value["posts"]),
+			Slug:      value["slug"],
+			Title:     value["title"],
+			User:      value["user"],
+		}
+
+		responseMsg.Threads = append(responseMsg.Threads, *tempMsg)
 	}
 
 	return responseCode, responseMsg
@@ -1660,13 +1745,16 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 	return responseCode, responseMsg
 }
 
+// +
 func (t *Thread) details() string {
 	var resp string
 	var relatedUser, relatedForum bool
+
 	if len(t.inputRequest.query["thread"]) != 1 {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidResponse()
 	}
+	args := Args{}
+	args.append(t.inputRequest.query["thread"][0], t.inputRequest.query["thread"][0])
 
 	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("user", t.inputRequest.query["related"]) {
 		relatedUser = true
@@ -1674,103 +1762,99 @@ func (t *Thread) details() string {
 	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("forum", t.inputRequest.query["related"]) {
 		relatedForum = true
 	}
-
 	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("thread", t.inputRequest.query["related"]) {
 		return createInvalidQuery()
 	}
 
-	responseCode, responseMsg := t.getThreadDetails()
+	responseCode, responseMsg := t._getThreadDetails(args)
 
 	if relatedUser {
 		u := User{inputRequest: t.inputRequest, db: t.db}
-		u.inputRequest.query["user"] = append(u.inputRequest.query["user"], responseMsg["user"].(string))
-		_, userDetails := u.getUserDetails()
+		clearQuery(&u.inputRequest.query)
+		args := Args{}
+		args.append(responseMsg.User)
 
-		responseMsg["user"] = userDetails
+		_, userDetails := u._getUserDetails(args)
+
+		responseMsg.User = userDetails
 	}
 
 	if relatedForum {
 		f := Forum{inputRequest: t.inputRequest, db: t.db}
-		f.inputRequest.query["user"] = f.inputRequest.query["user"][:0]
-		f.inputRequest.query["forum"] = append(f.inputRequest.query["forum"], responseMsg["forum"].(string))
-		_, forumDetails := f.getForumDetails()
+		clearQuery(&f.inputRequest.query)
+		args := Args{}
+		args.append(responseMsg.Forum)
 
-		responseMsg["forum"] = forumDetails
+		_, forumDetails := f._getForumDetails(args)
+		responseMsg.Forum = forumDetails
 	}
 
-	resp, err := createResponse(responseCode, responseMsg)
-
+	resp, err := _createResponse(responseCode, responseMsg)
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err)
 	}
 
 	return resp
 }
 
+// Rewrite subquery
+// +
 func (t *Thread) list() string {
 	var resp, query string
-	f := false
-	var args []interface{}
+	args := Args{}
 
 	// Validate query values
 	if len(t.inputRequest.query["user"]) == 1 {
 		query = "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
-		args = append(args, t.inputRequest.query["user"][0])
-
-		f = true
-	}
-	if len(t.inputRequest.query["forum"]) == 1 && f == false {
+		args.append(t.inputRequest.query["user"][0])
+	} else if len(t.inputRequest.query["forum"]) == 1 {
 		query = "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
-		args = append(args, t.inputRequest.query["forum"][0])
-
-		f = true
-	}
-	if f == false {
-		resp = createInvalidResponse()
-		return resp
+		args.append(t.inputRequest.query["forum"][0])
+	} else {
+		return createInvalidResponse()
 	}
 
 	// Check and validate optional params
 	if len(t.inputRequest.query["since"]) >= 1 {
 		query += " AND t.date > ?"
-		args = append(args, t.inputRequest.query["since"][0])
+		args.append(t.inputRequest.query["since"][0])
 	}
 
 	query = query + " GROUP BY t.id"
 	if len(t.inputRequest.query["order"]) >= 1 {
 		orderType := t.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
 
 		query += fmt.Sprintf(" ORDER BY t.date %s", orderType)
 	}
+
 	if len(t.inputRequest.query["limit"]) >= 1 {
 		limitValue := t.inputRequest.query["limit"][0]
 		i, err := strconv.Atoi(limitValue)
 		if err != nil || i < 0 {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
+
 		query += fmt.Sprintf(" LIMIT %d", i)
 	}
 
 	// Response here
-	responseCode, responseMsg := t.getArrayThreadsDetails(query, args)
+	responseCode, responseMsg := t._getArrayThreadsDetails(query, args)
+
 	if responseCode != 0 {
-		if responseCode == 1 {
-			// E6ANYI KOSTYL`
-			test := make(map[string]interface{})
-			resp, _ = createResponse(0, test)
-			return resp
-		}
-		resp, _ = createResponse(responseCode, responseMsg[0])
-		return resp
+		return becauseFuckU()
 	}
-	resp, err := createResponseFromArray(responseCode, responseMsg)
+
+	responseInterface := make([]interface{}, len(responseMsg.Threads))
+	for i, v := range responseMsg.Threads {
+		responseInterface[i] = v
+	}
+
+	resp, err := _createResponseFromArray(responseCode, responseInterface)
 	if err != nil {
-		panic(err.Error())
+		log.Panic(err)
 	}
 
 	return resp
@@ -1924,8 +2008,7 @@ func (t *Thread) listPosts() string {
 		case "parent_tree":
 			parentTree = true
 		default:
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
 	} else {
 		sort = " ORDER BY date " + order
@@ -1968,6 +2051,7 @@ func (t *Thread) listPosts() string {
 	return resp
 }
 
+// +
 func (t *Thread) open() string {
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
@@ -1976,6 +2060,7 @@ func (t *Thread) open() string {
 	return resp
 }
 
+// +
 func (t *Thread) remove() string {
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
@@ -1988,6 +2073,7 @@ func (t *Thread) remove() string {
 	return resp
 }
 
+// +
 func (t *Thread) restore() string {
 	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
 
@@ -2000,6 +2086,7 @@ func (t *Thread) restore() string {
 	return resp
 }
 
+// +
 func (t *Thread) subscribe() string {
 	var resp string
 	args := Args{}
@@ -2023,23 +2110,13 @@ func (t *Thread) subscribe() string {
 
 		// return exist
 		if checkError1062(err) == true {
-			for k := range t.inputRequest.query {
-				delete(t.inputRequest.query, k)
-			}
+			clearQuery(&t.inputRequest.query)
 			t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], floatToString(t.inputRequest.json["thread"].(float64)))
 
-			resp = t.details()
-			return resp
+			return t.details()
 		}
 
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	// else return info
@@ -2060,6 +2137,7 @@ func (t *Thread) subscribe() string {
 	return resp
 }
 
+// +
 func (t *Thread) unsubscribe() string {
 	var resp string
 	args := Args{}
@@ -2079,24 +2157,14 @@ func (t *Thread) unsubscribe() string {
 
 	dbResp, err := execQuery(query, &args.data, t.db)
 	if err != nil {
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	if dbResp.rowCount == 0 {
-		for k := range t.inputRequest.query {
-			delete(t.inputRequest.query, k)
-		}
+		clearQuery(&t.inputRequest.query)
 		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], floatToString(t.inputRequest.json["thread"].(float64)))
 
-		resp = t.details()
-		return resp
+		return t.details()
 	}
 
 	responseCode := 0
@@ -2115,6 +2183,7 @@ func (t *Thread) unsubscribe() string {
 	return resp
 }
 
+// +
 func (t *Thread) update() string {
 	var resp string
 	args := Args{}
@@ -2136,23 +2205,15 @@ func (t *Thread) update() string {
 
 	_, err = execQuery(query, &args.data, t.db)
 	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
+	clearQuery(&t.inputRequest.query)
 	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
 	responseCode, responseMsg := t.getThreadDetails()
 
 	if responseCode != 0 {
-		resp = createNotExistResponse()
-		return resp
+		return createNotExistResponse()
 	}
 
 	resp, err = createResponse(responseCode, responseMsg)
@@ -2162,6 +2223,7 @@ func (t *Thread) update() string {
 	return resp
 }
 
+// +
 func (t *Thread) vote() string {
 	var resp string
 	var query string
@@ -2191,23 +2253,15 @@ func (t *Thread) vote() string {
 
 	_, err = execQuery(query, &args.data, t.db)
 	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
+	clearQuery(&t.inputRequest.query)
 	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
 	responseCode, responseMsg := t.getThreadDetails()
 
 	if responseCode != 0 {
-		resp = createNotExistResponse()
-		return resp
+		return createNotExistResponse()
 	}
 
 	resp, err = createResponse(responseCode, responseMsg)
@@ -2273,7 +2327,7 @@ type Post struct {
 }
 
 func (p *Post) create() string {
-	fmt.Println("post.create()\t", p.inputRequest)
+	// fmt.Println("post.create()\t", p.inputRequest)
 	var resp string
 	query := "INSERT INTO post (thread, message, user, forum, date, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
@@ -2369,15 +2423,7 @@ func (p *Post) create() string {
 
 	dbResp, err := execQuery(query, &args, p.db)
 	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	if boolParent {
@@ -2458,15 +2504,7 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 
 	dbResp, err := execQuery(query, &args.data, p.db)
 	if err != nil {
-		log.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	if dbResp.rowCount == 0 {
@@ -2555,7 +2593,7 @@ func (p *Post) getPostDetails() (int, map[string]interface{}) {
 }
 
 func (p *Post) details() string {
-	fmt.Println("post.details()\t", p.inputRequest)
+	// fmt.Println("post.details()\t", p.inputRequest)
 	var resp string
 	var relatedUser, relatedThread, relatedForum bool
 	if len(p.inputRequest.query["post"]) != 1 {
@@ -2607,7 +2645,7 @@ func (p *Post) details() string {
 	if err != nil {
 		panic(err.Error())
 	}
-	fmt.Println(resp)
+	// fmt.Println(resp)
 
 	return resp
 }
@@ -2703,7 +2741,7 @@ func (p *Post) getList(query string, order string, args []interface{}) (int, []m
 }
 
 func (p *Post) list() string {
-	fmt.Println("post.list()\t", p.inputRequest)
+	// fmt.Println("post.list()\t", p.inputRequest)
 	var query, order, resp string
 	f := false
 	var args []interface{}
@@ -2762,7 +2800,7 @@ func (p *Post) list() string {
 		resp = createInvalidResponse()
 	}
 
-	fmt.Println(resp)
+	// fmt.Println(resp)
 	return resp
 }
 
@@ -2805,15 +2843,7 @@ func (p *Post) update() string {
 
 	dbResp, err := execQuery(query, &args, p.db)
 	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	if dbResp.rowCount == 0 {
@@ -2871,15 +2901,7 @@ func (p *Post) vote() string {
 
 	_, err = execQuery(query, &args, p.db)
 	if err != nil {
-		fmt.Println(err)
-		responseCode, errorMessage := errorExecParse(err)
-
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		return resp
+		return createErrorResponse(err)
 	}
 
 	p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(postId)))
@@ -3022,6 +3044,10 @@ func main() {
 		panic(err.Error())
 	}
 
+	MAX_DB_CONNECTIONS := 2
+
+	db.SetMaxOpenConns(MAX_DB_CONNECTIONS)
+
 	PORT := ":8000"
 
 	fmt.Printf("The server is running on http://localhost%s\n", PORT)
@@ -3146,29 +3172,3 @@ func stringToBool(inputString string) (result bool) {
 
 	return
 }
-
-// =================
-// Future here
-// =================
-
-/*
-func testArrayJson(code int, response []response.Foo) string {
-	cacheContent := map[string]interface{}{
-		"code":     code,
-		"response": response,
-	}
-	result, _ := json.Marshal(cacheContent)
-
-	return string(result)
-}
-
-func testJson(code int, response response.Foo) string {
-	cacheContent := map[string]interface{}{
-		"code":     code,
-		"response": response,
-	}
-	result, _ := json.Marshal(cacheContent)
-
-	return string(result)
-}
-*/
