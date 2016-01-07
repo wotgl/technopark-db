@@ -282,21 +282,21 @@ type PostRestore struct {
 func (instance *PostRestore) Foo() bool { return true }
 
 type PostDetails struct {
-	Parent        int64  `json:"parent"`
-	Forum         string `json:"forum"`
-	Isapproved    bool   `json:"isApproved"`
-	User          string `json:"user"`
-	Dislikes      int64  `json:"dislikes"`
-	Isspam        bool   `json:"isSpam"`
-	Thread        int64  `json:"thread"`
-	Points        int64  `json:"points"`
-	Ishighlighted bool   `json:"isHighlighted"`
-	Isedited      bool   `json:"isEdited"`
-	Date          string `json:"date"`
-	Message       string `json:"message"`
-	Id            int64  `json:"id"`
-	Isdeleted     bool   `json:"isDeleted"`
-	Likes         int64  `json:"likes"`
+	Parent        *int64      `json:"parent"`
+	Forum         interface{} `json:"forum"`
+	IsApproved    bool        `json:"isApproved"`
+	User          interface{} `json:"user"`
+	Dislikes      int64       `json:"dislikes"`
+	IsSpam        bool        `json:"isSpam"`
+	Thread        interface{} `json:"thread"`
+	Points        int64       `json:"points"`
+	IsHighlighted bool        `json:"isHighlighted"`
+	IsEdited      bool        `json:"isEdited"`
+	Date          string      `json:"date"`
+	Message       string      `json:"message"`
+	Id            int64       `json:"id"`
+	IsDeleted     bool        `json:"isDeleted"`
+	Likes         int64       `json:"likes"`
 }
 
 func (instance *PostDetails) Foo() bool { return true }
@@ -340,18 +340,18 @@ type PostList struct {
 func (instance *PostList) Foo() bool { return true }
 
 type PostCreate struct {
-	Parent        int64  `json:"parent"`
-	Forum         string `json:"forum"`
-	Isapproved    bool   `json:"isApproved"`
-	Isspam        bool   `json:"isSpam"`
-	Thread        int64  `json:"thread"`
-	Ishighlighted bool   `json:"isHighlighted"`
-	Isedited      bool   `json:"isEdited"`
-	Date          string `json:"date"`
-	Message       string `json:"message"`
-	Id            int64  `json:"id"`
-	Isdeleted     bool   `json:"isDeleted"`
-	User          string `json:"user"`
+	Parent        *string `json:"parent"`
+	Forum         string  `json:"forum"`
+	IsApproved    bool    `json:"isApproved"`
+	IsSpam        bool    `json:"isSpam"`
+	Thread        float64 `json:"thread"`
+	IsHighlighted bool    `json:"isHighlighted"`
+	IsEdited      bool    `json:"isEdited"`
+	Date          string  `json:"date"`
+	Message       string  `json:"message"`
+	Id            int64   `json:"id"`
+	IsDeleted     bool    `json:"isDeleted"`
+	User          string  `json:"user"`
 }
 
 func (instance *PostCreate) Foo() bool { return true }
