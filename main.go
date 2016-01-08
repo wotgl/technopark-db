@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -237,45 +236,24 @@ func createNotExistResponse() string {
 }
 
 // KOSTYL` API
-func becauseFuckU() string {
+func becauseAPI() string {
 	kostyl := make(map[string]interface{})
 	resp, _ := createResponse(0, kostyl)
 
 	return resp
 }
 
-func validateJson(ir *InputRequest, args ...string) (string, error) {
-	var resp string
-
+func validateJson(ir *InputRequest, args ...string) bool {
 	for _, value := range args {
 		if reflect.TypeOf(ir.json[value]) == nil {
-			resp = createInvalidResponse()
-			return resp, errors.New("Invalid json")
+			return false
 		}
 	}
 
-	return "", nil
+	return true
 }
 
-func validateBoolParams(json map[string]interface{}, args *[]interface{}, params ...string) (string, error) {
-	var resp string
-
-	for _, value := range params {
-
-		if json[value] == nil {
-			*args = append(*args, false)
-		} else {
-			if reflect.TypeOf(json[value]).Kind() != reflect.Bool {
-				return "", nil
-			}
-			*args = append(*args, json[value])
-		}
-	}
-
-	return resp, nil
-}
-
-func _validateBoolParams(json map[string]interface{}, args *Args, params ...string) bool {
+func validateBoolParams(json map[string]interface{}, args *Args, params ...string) bool {
 	for _, value := range params {
 
 		if json[value] == nil {
@@ -326,25 +304,6 @@ func (args *Args) clear() {
 // ======================
 // Database queries here
 // ======================
-
-func createArgs(stringArgs []string) *[]interface{} {
-	args := make([]interface{}, len(stringArgs))
-	for i, s := range stringArgs {
-		args[i] = s
-	}
-
-	return &args
-}
-
-func createArgsFromJson(stringArgs map[string]interface{}) *[]interface{} {
-	// args := make([]interface{}, len(stringArgs))
-	var args []interface{}
-	for _, s := range stringArgs {
-		args = append(args, s)
-	}
-
-	return &args
-}
 
 type ExecResponse struct {
 	lastId   int64
@@ -473,8 +432,7 @@ func (u *User) create() string {
 
 	query := "INSERT INTO user (username, about, name, email, isAnonymous) VALUES(?, ?, ?, ?, ?)"
 
-	resp, err := validateJson(u.inputRequest, "email")
-	if err != nil {
+	if !validateJson(u.inputRequest, "email") {
 		return createInvalidJsonResponse(u.inputRequest)
 	}
 
@@ -730,14 +688,13 @@ func (u *User) follow() string {
 
 	args := Args{}
 
-	resp, err := validateJson(u.inputRequest, "follower", "followee")
-	if err != nil {
+	if !validateJson(u.inputRequest, "follower", "followee") {
 		return createInvalidJsonResponse(u.inputRequest)
 	}
 
 	args.generateFromJson(&u.inputRequest.json, "follower", "followee")
 
-	_, err = execQuery(query, &args.data, u.db)
+	_, err := execQuery(query, &args.data, u.db)
 	if err != nil {
 		// return exist
 		if checkError1062(err) == true {
@@ -885,14 +842,13 @@ func (u *User) unfollow() string {
 
 	args := Args{}
 
-	_, err := validateJson(u.inputRequest, "follower", "followee")
-	if err != nil {
+	if !validateJson(u.inputRequest, "follower", "followee") {
 		return createInvalidJsonResponse(u.inputRequest)
 	}
 
 	args.generateFromJson(&u.inputRequest.json, "follower", "followee")
 
-	_, err = execQuery(query, &args.data, u.db)
+	_, err := execQuery(query, &args.data, u.db)
 	if err != nil {
 		return createErrorResponse(err)
 	}
@@ -908,14 +864,13 @@ func (u *User) updateProfile() string {
 
 	args := Args{}
 
-	_, err := validateJson(u.inputRequest, "about", "name", "user")
-	if err != nil {
+	if !validateJson(u.inputRequest, "about", "name", "user") {
 		return createInvalidJsonResponse(u.inputRequest)
 	}
 
 	args.generateFromJson(&u.inputRequest.json, "about", "name", "user")
 
-	_, err = execQuery(query, &args.data, u.db)
+	_, err := execQuery(query, &args.data, u.db)
 	if err != nil {
 		return createErrorResponse(err)
 	}
@@ -973,8 +928,7 @@ func (f *Forum) create() string {
 
 	query := "INSERT INTO forum (name, short_name, user) VALUES(?, ?, ?)"
 
-	resp, err := validateJson(f.inputRequest, "name", "short_name", "user")
-	if err != nil {
+	if !validateJson(f.inputRequest, "name", "short_name", "user") {
 		return createInvalidJsonResponse(f.inputRequest)
 	}
 
@@ -1465,12 +1419,11 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 	var resp string
 	args := Args{}
 
-	resp, err := validateJson(t.inputRequest, "thread")
-	if err != nil {
+	if !validateJson(t.inputRequest, "thread") {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+	if !checkFloat64Type(t.inputRequest.json["thread"]) {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
@@ -1484,14 +1437,15 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 	}
 
 	if dbResp.rowCount == 0 {
-		t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-		responseCode, responseMsg := t.getThreadDetails()
+		threadArgs := Args{}
+		threadArgs.append(threadId, threadId)
+		responseCode, responseMsg := t._getThreadDetails(threadArgs)
 
 		if responseCode != 0 {
 			return createNotExistResponse()
 		}
 
-		resp, err = createResponse(responseCode, responseMsg)
+		resp, err = _createResponse(responseCode, responseMsg)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -1527,8 +1481,7 @@ func (t *Thread) create() string {
 
 	query := "INSERT INTO thread (forum, title, isClosed, user, date, message, slug, isDeleted) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
 
-	resp, err := validateJson(t.inputRequest, "forum", "title", "isClosed", "user", "date", "message", "slug")
-	if err != nil {
+	if !validateJson(t.inputRequest, "forum", "title", "isClosed", "user", "date", "message", "slug") {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
@@ -1761,7 +1714,7 @@ func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, 
 }
 
 // +
-// Проверка на пустой ответ с кодом 1
+// Проверка на пустой ответ с кодом 1 после _getThreadDetails()
 func (t *Thread) details() string {
 	var resp string
 	var relatedUser, relatedForum bool
@@ -1860,7 +1813,7 @@ func (t *Thread) list() string {
 	responseCode, responseMsg := t._getArrayThreadsDetails(query, args)
 
 	if responseCode != 0 {
-		return becauseFuckU()
+		return becauseAPI()
 	}
 
 	responseInterface := make([]interface{}, len(responseMsg.Threads))
@@ -2109,18 +2062,17 @@ func (t *Thread) subscribe() string {
 
 	query := "INSERT INTO subscribe (thread, user) VALUES(?, ?)"
 
-	resp, err := validateJson(t.inputRequest, "thread", "user")
-	if err != nil {
+	if !validateJson(t.inputRequest, "thread", "user") {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+	if !checkFloat64Type(t.inputRequest.json["thread"]) {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
 	args.generateFromJson(&t.inputRequest.json, "thread", "user")
 
-	_, err = execQuery(query, &args.data, t.db)
+	_, err := execQuery(query, &args.data, t.db)
 	if err != nil {
 		fmt.Println(err)
 
@@ -2160,12 +2112,11 @@ func (t *Thread) unsubscribe() string {
 
 	query := "DELETE FROM subscribe WHERE thread = ? AND user = ?"
 
-	resp, err := validateJson(t.inputRequest, "thread", "user")
-	if err != nil {
+	if !validateJson(t.inputRequest, "thread", "user") {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+	if !checkFloat64Type(t.inputRequest.json["thread"]) {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
@@ -2206,12 +2157,11 @@ func (t *Thread) update() string {
 
 	query := "UPDATE thread SET message = ?, slug = ? WHERE id = ?"
 
-	resp, err := validateJson(t.inputRequest, "thread", "message", "slug")
-	if err != nil {
+	if !validateJson(t.inputRequest, "thread", "message", "slug") {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false {
+	if !checkFloat64Type(t.inputRequest.json["thread"]) {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
@@ -2219,20 +2169,20 @@ func (t *Thread) update() string {
 
 	args.generateFromJson(&t.inputRequest.json, "message", "slug", "thread")
 
-	_, err = execQuery(query, &args.data, t.db)
+	_, err := execQuery(query, &args.data, t.db)
 	if err != nil {
 		return createErrorResponse(err)
 	}
 
-	clearQuery(&t.inputRequest.query)
-	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-	responseCode, responseMsg := t.getThreadDetails()
+	threadArgs := Args{}
+	threadArgs.append(threadId, threadId)
+	responseCode, responseMsg := t._getThreadDetails(threadArgs)
 
 	if responseCode != 0 {
 		return createNotExistResponse()
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -2244,12 +2194,11 @@ func (t *Thread) vote() string {
 	var resp, query string
 	args := Args{}
 
-	resp, err := validateJson(t.inputRequest, "thread", "vote")
-	if err != nil {
+	if !validateJson(t.inputRequest, "thread", "vote") {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
-	if checkFloat64Type(t.inputRequest.json["thread"]) == false || checkFloat64Type(t.inputRequest.json["vote"]) == false {
+	if !checkFloat64Type(t.inputRequest.json["thread"]) || !checkFloat64Type(t.inputRequest.json["vote"]) {
 		return createInvalidJsonResponse(t.inputRequest)
 	}
 
@@ -2266,20 +2215,20 @@ func (t *Thread) vote() string {
 
 	args.append(threadId)
 
-	_, err = execQuery(query, &args.data, t.db)
+	_, err := execQuery(query, &args.data, t.db)
 	if err != nil {
 		return createErrorResponse(err)
 	}
 
-	clearQuery(&t.inputRequest.query)
-	t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], intToString(int(threadId)))
-	responseCode, responseMsg := t.getThreadDetails()
+	threadArgs := Args{}
+	threadArgs.append(threadId, threadId)
+	responseCode, responseMsg := t._getThreadDetails(threadArgs)
 
 	if responseCode != 0 {
 		return createNotExistResponse()
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -2348,14 +2297,13 @@ func (p *Post) create() string {
 
 	query := "INSERT INTO post (thread, message, user, forum, date, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
-	resp, err := validateJson(p.inputRequest, "thread", "message", "user", "forum", "date")
-	if err != nil {
+	if !validateJson(p.inputRequest, "thread", "message", "user", "forum", "date") {
 		return createInvalidJsonResponse(p.inputRequest)
 	}
 
 	args.generateFromJson(&p.inputRequest.json, "thread", "message", "user", "forum", "date")
 
-	if !_validateBoolParams(p.inputRequest.json, &args, "isApproved", "isHighlighted", "isEdited", "isSpam", "isDeleted") {
+	if !validateBoolParams(p.inputRequest.json, &args, "isApproved", "isHighlighted", "isEdited", "isSpam", "isDeleted") {
 		return createInvalidJsonResponse(p.inputRequest)
 	}
 	var boolParent bool
@@ -2472,6 +2420,7 @@ func (p *Post) create() string {
 	return resp
 }
 
+// +
 func (p *Post) getParentId(id int64, path string) int {
 	if len(path) == 5 {
 		return int(id)
@@ -2486,7 +2435,7 @@ func (p *Post) getParentId(id int64, path string) int {
 
 		getParent, _ := selectQuery(query, &args.data, p.db)
 
-		respId, _ := strconv.ParseInt(getParent.values[0]["id"], 10, 64)
+		respId := stringToInt64(getParent.values[0]["id"])
 
 		return int(respId)
 	}
@@ -2497,8 +2446,7 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 	var resp string
 	args := Args{}
 
-	resp, err := validateJson(p.inputRequest, "post")
-	if err != nil {
+	if !validateJson(p.inputRequest, "post") {
 		return createInvalidJsonResponse(p.inputRequest)
 	}
 
@@ -2516,16 +2464,16 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 	}
 
 	if dbResp.rowCount == 0 {
-		clearQuery(&p.inputRequest.query)
-		p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(postId)))
+		postArgs := Args{}
+		postArgs.append(postId)
 
-		responseCode, responseMsg := p.getPostDetails()
+		responseCode, responseMsg := p._getPostDetails(postArgs)
 
 		if responseCode != 0 {
 			return createNotExistResponse()
 		}
 
-		resp, err = createResponse(responseCode, responseMsg)
+		resp, err = _createResponse(responseCode, responseMsg)
 		if err != nil {
 			panic(err.Error())
 		}
@@ -2545,6 +2493,7 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 	return resp
 }
 
+// -
 func (p *Post) getPostDetails() (int, map[string]interface{}) {
 	query := "SELECT * FROM post WHERE id = ?"
 	var args []interface{}
@@ -2716,6 +2665,7 @@ func (p *Post) details() string {
 	return resp
 }
 
+// -
 func (p *Post) getArrayPostDetails(query string, args []interface{}) (int, []map[string]interface{}) {
 	getPost, err := selectQuery(query, &args, p.db)
 	if err != nil {
@@ -2780,6 +2730,59 @@ func (p *Post) getArrayPostDetails(query string, args []interface{}) (int, []map
 	return responseCode, responseMsg
 }
 
+// +
+func (p *Post) _getArrayPostDetails(query string, args Args) (int, *rs.PostList) {
+	getPost, err := selectQuery(query, &args.data, p.db)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if getPost.rows == 0 {
+		responseCode := 1
+		errorMessage := &rs.PostList{}
+
+		return responseCode, errorMessage
+	}
+
+	responseCode := 0
+	responseArray := make([]rs.PostDetails, 0)
+	responseMsg := &rs.PostList{Posts: responseArray}
+
+	for _, value := range getPost.values {
+		respId := stringToInt64(value["id"])
+
+		tempMsg := &rs.PostDetails{
+			Date:          value["date"],
+			Dislikes:      stringToInt64(value["dislikes"]),
+			Forum:         value["forum"],
+			Id:            respId,
+			IsApproved:    stringToBool(value["isApproved"]),
+			IsHighlighted: stringToBool(value["isHighlighted"]),
+			IsEdited:      stringToBool(value["isEdited"]),
+			IsSpam:        stringToBool(value["isSpam"]),
+			IsDeleted:     stringToBool(value["isDeleted"]),
+			Likes:         stringToInt64(value["likes"]),
+			Message:       value["message"],
+			Parent:        nil,
+			Points:        stringToInt64(value["points"]),
+			Thread:        stringToInt64(value["thread"]),
+			User:          value["user"],
+		}
+
+		parent := p.getParentId(respId, value["parent"])
+		if parent == int(respId) {
+			tempMsg.Parent = nil
+		} else {
+			tempParent := int64(parent)
+			tempMsg.Parent = &tempParent
+		}
+
+		responseMsg.Posts = append(responseMsg.Posts, *tempMsg)
+	}
+
+	return responseCode, responseMsg
+}
+
 func (p *Post) getList(query string, order string, args []interface{}) (int, []map[string]interface{}) {
 	// Check and validate optional params
 	if len(p.inputRequest.query["since"]) >= 1 {
@@ -2806,42 +2809,53 @@ func (p *Post) getList(query string, order string, args []interface{}) (int, []m
 	return responseCode, responseMsg
 }
 
+// +
+func (p *Post) _getList(query string, order string, args Args) (int, *rs.PostList) {
+	// Check and validate optional params
+	if len(p.inputRequest.query["since"]) >= 1 {
+		query += " AND date > ?"
+		args.append(p.inputRequest.query["since"][0])
+	}
+
+	query += order
+
+	if len(p.inputRequest.query["limit"]) >= 1 {
+		i, err := strconv.Atoi(p.inputRequest.query["limit"][0])
+		if err != nil || i < 0 {
+			return 100500, nil
+		}
+		query += fmt.Sprintf(" LIMIT %d", i)
+	}
+
+	responseCode, responseMsg := p._getArrayPostDetails(query, args)
+
+	return responseCode, responseMsg
+}
+
+// +
 func (p *Post) list() string {
-	// fmt.Println("post.list()\t", p.inputRequest)
 	var query, order, resp string
-	f := false
-	var args []interface{}
+	args := Args{}
 
 	// Validate query values
 	if len(p.inputRequest.query["thread"]) == 1 {
 		query = "SELECT * FROM post WHERE thread = ?"
-		args = append(args, p.inputRequest.query["thread"][0])
-
-		f = true
-	}
-	if len(p.inputRequest.query["user"]) == 1 && f == false {
+		args.append(p.inputRequest.query["thread"][0])
+	} else if len(p.inputRequest.query["user"]) == 1 {
 		query = "SELECT * FROM post WHERE user = ?"
-		args = append(args, p.inputRequest.query["user"][0])
-
-		f = true
-	}
-	if len(p.inputRequest.query["forum"]) == 1 && f == false {
+		args.append(p.inputRequest.query["user"][0])
+	} else if len(p.inputRequest.query["forum"]) == 1 {
 		query = "SELECT * FROM post WHERE forum = ?"
-		args = append(args, p.inputRequest.query["forum"][0])
-
-		f = true
-	}
-	if f == false {
-		resp = createInvalidResponse()
-		return resp
+		args.append(p.inputRequest.query["forum"][0])
+	} else {
+		return createInvalidResponse()
 	}
 
 	// order by here
 	if len(p.inputRequest.query["order"]) >= 1 {
 		orderType := p.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
 
 		order = fmt.Sprintf(" ORDER BY date %s", orderType)
@@ -2849,24 +2863,21 @@ func (p *Post) list() string {
 		order = " ORDER BY date DESC"
 	}
 
-	responseCode, responseMsg := p.getList(query, order, args)
+	responseCode, responseMsg := p._getList(query, order, args)
 
 	// check responseCode
-	if responseCode == 100500 {
-		resp = createInvalidResponse()
+	if responseCode == 0 {
+		responseInterface := make([]interface{}, len(responseMsg.Posts))
+		for i, v := range responseMsg.Posts {
+			responseInterface[i] = v
+		}
+		resp, _ = _createResponseFromArray(responseCode, responseInterface)
 	} else if responseCode == 1 {
-		// E6ANYI KOSTYL`
-		test := make(map[string]interface{})
-		resp, _ = createResponse(0, test)
-		// resp, _ = createResponse(responseCode, responseMsg[0])
-
-	} else if responseCode == 0 {
-		resp, _ = createResponseFromArray(responseCode, responseMsg)
+		resp = becauseAPI()
 	} else {
 		resp = createInvalidResponse()
 	}
 
-	// fmt.Println(resp)
 	return resp
 }
 
@@ -2888,66 +2899,62 @@ func (p *Post) restore() string {
 	return resp
 }
 
+// +
 func (p *Post) update() string {
 	var resp string
 	query := "UPDATE post SET message = ? WHERE id = ?"
 
-	var args []interface{}
+	args := Args{}
 
-	resp, err := validateJson(p.inputRequest, "post", "message")
-	if err != nil {
-		return resp
+	if !validateJson(p.inputRequest, "message", "post") {
+		return createInvalidJsonResponse(p.inputRequest)
 	}
 
-	if checkFloat64Type(p.inputRequest.json["post"]) == false {
-		resp = createInvalidResponse()
-		return resp
+	if !checkFloat64Type(p.inputRequest.json["post"]) {
+		return createInvalidJsonResponse(p.inputRequest)
 	}
 
 	threadId := p.inputRequest.json["post"].(float64)
+	args.generateFromJson(&p.inputRequest.json, "message", "post")
 
-	args = append(args, p.inputRequest.json["message"])
-	args = append(args, p.inputRequest.json["post"])
-
-	dbResp, err := execQuery(query, &args, p.db)
+	dbResp, err := execQuery(query, &args.data, p.db)
 	if err != nil {
 		return createErrorResponse(err)
 	}
 
 	if dbResp.rowCount == 0 {
 		query := "UPDATE post SET isEdited = false WHERE id = ?"
-		_, _ = execQuery(query, &args, p.db)
+		_, _ = execQuery(query, &args.data, p.db)
 	} else {
 		query := "UPDATE post SET isEdited = true WHERE id = ?"
-		_, _ = execQuery(query, &args, p.db)
+		_, _ = execQuery(query, &args.data, p.db)
 	}
 
-	p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(threadId)))
-	responseCode, responseMsg := p.getPostDetails()
+	postArgs := Args{}
+	postArgs.append(threadId)
+	responseCode, responseMsg := p._getPostDetails(postArgs)
 
 	if responseCode != 0 {
-		resp = createNotExistResponse()
-		return resp
+		return createNotExistResponse()
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
 	return resp
 }
 
-//
+// +
 func (p *Post) vote() string {
 	var resp, query string
 	args := Args{}
 
-	resp, err := validateJson(p.inputRequest, "post", "vote")
-	if err != nil {
+	if !validateJson(p.inputRequest, "post", "vote") {
 		return createInvalidJsonResponse(p.inputRequest)
 	}
 
-	if checkFloat64Type(p.inputRequest.json["post"]) == false || checkFloat64Type(p.inputRequest.json["vote"]) == false {
+	if !checkFloat64Type(p.inputRequest.json["post"]) || !checkFloat64Type(p.inputRequest.json["vote"]) {
 		return createInvalidJsonResponse(p.inputRequest)
 	}
 
@@ -2964,20 +2971,20 @@ func (p *Post) vote() string {
 
 	args.append(p.inputRequest.json["post"])
 
-	_, err = execQuery(query, &args.data, p.db)
+	_, err := execQuery(query, &args.data, p.db)
 	if err != nil {
 		return createErrorResponse(err)
 	}
 
-	clearQuery(&p.inputRequest.query)
-	p.inputRequest.query["post"] = append(p.inputRequest.query["post"], intToString(int(postId)))
-	responseCode, responseMsg := p.getPostDetails()
+	postArgs := Args{}
+	postArgs.append(postId)
+	responseCode, responseMsg := p._getPostDetails(postArgs)
 
 	if responseCode != 0 {
 		return createNotExistResponse()
 	}
 
-	resp, err = createResponse(responseCode, responseMsg)
+	resp, err = _createResponse(responseCode, responseMsg)
 	if err != nil {
 		panic(err.Error())
 	}
