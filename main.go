@@ -1062,17 +1062,17 @@ func (f *Forum) details() string {
 
 // +
 func (f *Forum) listThreads() string {
+	var resp string
 	relatedUser := false
 	relatedForum := false
 
 	t := Thread{inputRequest: f.inputRequest, db: f.db}
-	var resp string
 
 	responseCode, responseMsg := t.listBasic()
 
 	if responseCode == 1 {
 		return becauseAPI()
-	} else if responseCode == 100500 {
+	} else if responseCode != 0 {
 		return createInvalidResponse()
 	}
 
@@ -1085,7 +1085,6 @@ func (f *Forum) listThreads() string {
 	}
 
 	// Response here
-
 	for key, _ := range responseMsg.Threads {
 		if relatedUser {
 			u := User{inputRequest: f.inputRequest, db: f.db}
@@ -1093,7 +1092,7 @@ func (f *Forum) listThreads() string {
 			userArgs.append(responseMsg.Threads[key].User)
 
 			_, responseUser := u._getUserDetails(userArgs)
-			responseMsg.Threads[key].User = &responseUser
+			responseMsg.Threads[key].User = responseUser
 		}
 
 		if relatedForum {
@@ -1102,7 +1101,7 @@ func (f *Forum) listThreads() string {
 			forumArgs.append(responseMsg.Threads[key].Forum)
 
 			_, responseForum := f._getForumDetails(forumArgs)
-			responseMsg.Threads[key].Forum = &responseForum
+			responseMsg.Threads[key].Forum = responseForum
 		}
 	}
 
@@ -1119,41 +1118,34 @@ func (f *Forum) listThreads() string {
 	return resp
 }
 
+//
 func (f *Forum) listPosts() string {
 	var query, order, resp string
 	relatedUser := false
 	relatedThread := false
 	relatedForum := false
-	var args []interface{}
+	args := Args{}
 
 	p := Post{inputRequest: f.inputRequest, db: f.db}
 
 	// Validate query values
 	if len(p.inputRequest.query["forum"]) == 1 {
 		query = "SELECT * FROM post p WHERE p.forum = ?"
-		args = append(args, p.inputRequest.query["forum"][0])
-
+		args.append(p.inputRequest.query["forum"][0])
 	} else {
-		resp = createInvalidResponse()
-		return resp
+		return createInvalidResponse()
 	}
 
 	// related params
 	// var join string
 	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("user", f.inputRequest.query["related"]) {
 		relatedUser = true
-		// query += " "
-		// join += " LEFT JOIN user u ON p.user=u.email"
 	}
 	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("thread", f.inputRequest.query["related"]) {
 		relatedThread = true
-		// query += " "
-		// join += " LEFT JOIN thread t ON p.thread=t.id"
 	}
 	if len(f.inputRequest.query["related"]) >= 1 && stringInSlice("forum", f.inputRequest.query["related"]) {
 		relatedForum = true
-		// query += " "
-		// join += " LEFT JOIN forum f ON p.forum=f.short_name"
 	}
 
 	// order by here
@@ -1168,109 +1160,53 @@ func (f *Forum) listPosts() string {
 		order = " ORDER BY date DESC"
 	}
 
-	// Check and validate optional params
-	if len(p.inputRequest.query["since"]) >= 1 {
-		query += " AND date > ?"
-		args = append(args, p.inputRequest.query["since"][0])
+	responseCode, responseMsg := p._getList(query, order, args)
+
+	if responseCode == 1 {
+		return becauseAPI()
+	} else if responseCode != 0 {
+		return createInvalidResponse()
 	}
 
-	query += order
-
-	if len(p.inputRequest.query["limit"]) >= 1 {
-		limitValue := p.inputRequest.query["limit"][0]
-		i, err := strconv.Atoi(limitValue)
-		if err != nil || i < 0 {
-			return createInvalidResponse()
-		}
-		query += fmt.Sprintf(" LIMIT %d", i)
-	}
-
-	getPost, err := selectQuery(query, &args, p.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	if getPost.rows == 0 {
-		// E6ANYI KOSTYL`
-		test := make(map[string]interface{})
-		resp, _ = createResponse(0, test)
-
-		return resp
-		return createNotFoundForArray()
-	}
-
-	responseCode := 0
-	var responseMsg []map[string]interface{}
-
-	for _, value := range getPost.values {
-		respId, _ := strconv.ParseInt(value["id"], 10, 64)
-		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
-		respDislikes, _ := strconv.ParseInt(value["dislikes"], 10, 64)
-		respPoints, _ := strconv.ParseInt(value["points"], 10, 64)
-		respThread, _ := strconv.ParseInt(value["thread"], 10, 64)
-		respIsApproved, _ := strconv.ParseBool(value["isApproved"])
-		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
-		respIsEdited, _ := strconv.ParseBool(value["isEdited"])
-		respIsHighlighted, _ := strconv.ParseBool(value["isHighlighted"])
-		respIsSpam, _ := strconv.ParseBool(value["isSpam"])
-
-		tempMsg := map[string]interface{}{
-			"date":          value["date"],
-			"dislikes":      respDislikes,
-			"forum":         value["forum"],
-			"id":            respId,
-			"isApproved":    respIsApproved,
-			"isDeleted":     respIsDeleted,
-			"isEdited":      respIsEdited,
-			"isHighlighted": respIsHighlighted,
-			"isSpam":        respIsSpam,
-			"likes":         respLikes,
-			"message":       value["message"],
-			"parent":        nil,
-			"points":        respPoints,
-			"thread":        respThread,
-			"user":          value["user"],
-		}
-
-		parent := p.getParentId(respId, value["parent"])
-		if parent == int(respId) {
-			tempMsg["parent"] = nil
-		} else {
-			tempMsg["parent"] = parent
-		}
-
+	for key, _ := range responseMsg.Posts {
 		if relatedUser {
 			u := User{inputRequest: f.inputRequest, db: f.db}
-			u.inputRequest.query["user"] = u.inputRequest.query["user"][0:0]
-			u.inputRequest.query["user"] = append(u.inputRequest.query["user"], value["user"])
+			userArgs := Args{}
+			userArgs.append(responseMsg.Posts[key].User)
 
-			_, responseUser := u.getUserDetails()
-			tempMsg["user"] = responseUser
+			_, responseUser := u._getUserDetails(userArgs)
+			responseMsg.Posts[key].User = responseUser
 		}
 
 		if relatedThread {
 			t := Thread{inputRequest: f.inputRequest, db: f.db}
-			t.inputRequest.query["thread"] = t.inputRequest.query["thread"][0:0]
-			t.inputRequest.query["thread"] = append(t.inputRequest.query["thread"], value["thread"])
+			threadArgs := Args{}
+			threadArgs.append(responseMsg.Posts[key].Thread, responseMsg.Posts[key].Thread)
 
-			_, responseThread := t.getThreadDetails()
-			tempMsg["thread"] = responseThread
+			_, responseThread := t._getThreadDetails(threadArgs)
+			responseMsg.Posts[key].Thread = responseThread
 		}
 
 		if relatedForum {
-
 			f := Forum{inputRequest: f.inputRequest, db: f.db}
-			f.inputRequest.query["forum"] = f.inputRequest.query["forum"][0:0]
-			f.inputRequest.query["forum"] = append(f.inputRequest.query["forum"], value["forum"])
+			forumArgs := Args{}
+			forumArgs.append(responseMsg.Posts[key].Forum)
 
-			_, responseForum := f.getForumDetails()
-			tempMsg["forum"] = responseForum
+			_, responseForum := f._getForumDetails(forumArgs)
+			responseMsg.Posts[key].Forum = responseForum
 		}
-
-		responseMsg = append(responseMsg, tempMsg)
 	}
 
-	resp, _ = createResponseFromArray(responseCode, responseMsg)
+	responseInterface := make([]interface{}, len(responseMsg.Posts))
+	for i, v := range responseMsg.Posts {
+		responseInterface[i] = v
+	}
+
+	resp, err := _createResponseFromArray(responseCode, responseInterface)
+	if err != nil {
+		log.Panic(err)
+	}
+
 	return resp
 }
 
@@ -1288,7 +1224,7 @@ func (f *Forum) listUsers() string {
 
 	args.append(f.inputRequest.query["forum"][0])
 
-	// Check and validate optional params
+	// Optional params
 	if len(f.inputRequest.query["since_id"]) >= 1 {
 		query += " AND u.id >= ?"
 		args.append(f.inputRequest.query["since_id"][0])
@@ -1313,6 +1249,7 @@ func (f *Forum) listUsers() string {
 		query += fmt.Sprintf(" LIMIT %d", i)
 	}
 
+	// Query
 	users, err := selectQuery(query, &args.data, f.db)
 	if err != nil {
 		log.Panic(err)
@@ -1322,6 +1259,7 @@ func (f *Forum) listUsers() string {
 		return becauseAPI()
 	}
 
+	// Generate response
 	responseCode := 0
 	responseArray := make([]rs.UserDetails, 0)
 	responseMsg := &rs.UserListBasic{Users: responseArray}
@@ -1336,6 +1274,7 @@ func (f *Forum) listUsers() string {
 		responseMsg.Users = append(responseMsg.Users, *responseUser)
 	}
 
+	// Convert to interface
 	responseInterface := make([]interface{}, len(responseMsg.Users))
 	for i, v := range responseMsg.Users {
 		responseInterface[i] = v
@@ -2631,6 +2570,8 @@ func (p *Post) _getList(query string, order string, args Args) (int, *rs.PostLis
 		}
 		query += fmt.Sprintf(" LIMIT %d", i)
 	}
+
+	fmt.Println("_getList: ", query, args.data)
 
 	responseCode, responseMsg := p._getArrayPostDetails(query, args)
 
