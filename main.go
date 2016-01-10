@@ -537,7 +537,7 @@ func (u *User) _getUserDetails(args Args) (int, *rs.UserDetails) {
 	return responseCode, responseMsg
 }
 
-// -
+// delete
 func (u *User) getUserDetails() (int, map[string]interface{}) {
 	query := "SELECT * FROM user WHERE email = ?"
 	var args []interface{}
@@ -829,6 +829,7 @@ func (u *User) listFollowing() string {
 	return resp
 }
 
+// +
 func (u *User) listPosts() string {
 	delete(u.inputRequest.query, "forum")
 
@@ -1829,17 +1830,17 @@ func (t *Thread) list() string {
 	return resp
 }
 
-func (t *Thread) parentTree(order string) (int, []map[string]interface{}) {
-	var args []interface{}
+func (t *Thread) parentTree(order string) (int, *rs.PostList) {
 	query := "SELECT parent FROM post WHERE thread = ?"
 	order = " ORDER BY parent " + order
+	args := Args{}
 
-	args = append(args, t.inputRequest.query["thread"][0])
+	args.append(t.inputRequest.query["thread"][0])
 
 	// Check and validate optional params
 	if len(t.inputRequest.query["since"]) >= 1 {
 		query += " AND date > ?"
-		args = append(args, t.inputRequest.query["since"][0])
+		args.append(t.inputRequest.query["since"][0])
 	}
 
 	query += " GROUP BY id HAVING LENGTH(parent) = 5"
@@ -1858,107 +1859,89 @@ func (t *Thread) parentTree(order string) (int, []map[string]interface{}) {
 	// query here
 	//
 
-	getPost, err := selectQuery(query, &args, t.db)
+	getPost, err := selectQuery(query, &args.data, t.db)
 	if err != nil {
 		log.Panic(err)
 	}
 
 	if getPost.rows == 0 {
-		var responseMsg []map[string]interface{}
 		responseCode := 1
-		errorMessage := map[string]interface{}{
-			"msg": "Not found",
-		}
-		responseMsg = append(responseMsg, errorMessage)
+		errorMessage := &rs.PostList{}
 
-		// fmt.Println(responseCode, errorMessage)
-		return responseCode, responseMsg
+		return responseCode, errorMessage
 	}
 
 	responseCode := 0
-	var responseMsg []map[string]interface{}
+	responseArray := make([]rs.PostDetails, 0)
+	responseMsg := &rs.PostList{Posts: responseArray}
 
 	for _, value := range getPost.values {
 		subQuery := "SELECT * FROM post WHERE thread = ? AND parent LIKE ? ORDER BY parent"
-		var subArgs []interface{}
-		subArgs = append(subArgs, t.inputRequest.query["thread"][0])
-		subArgs = append(subArgs, value["parent"]+"%")
+		subArgs := Args{}
+		subArgs.append(t.inputRequest.query["thread"][0])
+		subArgs.append(value["parent"] + "%")
 
-		getSubPost, err := selectQuery(subQuery, &subArgs, t.db)
+		getSubPost, err := selectQuery(subQuery, &subArgs.data, t.db)
 		if err != nil {
 			log.Panic(err)
 		}
 
 		for _, subValue := range getSubPost.values {
-			respId, _ := strconv.ParseInt(subValue["id"], 10, 64)
-			respLikes, _ := strconv.ParseInt(subValue["likes"], 10, 64)
-			respDislikes, _ := strconv.ParseInt(subValue["dislikes"], 10, 64)
-			respPoints, _ := strconv.ParseInt(subValue["points"], 10, 64)
-			respThread, _ := strconv.ParseInt(subValue["thread"], 10, 64)
-			respIsApproved, _ := strconv.ParseBool(subValue["isApproved"])
-			respIsDeleted, _ := strconv.ParseBool(subValue["isDeleted"])
-			respIsEdited, _ := strconv.ParseBool(subValue["isEdited"])
-			respIsHighlighted, _ := strconv.ParseBool(subValue["isHighlighted"])
-			respIsSpam, _ := strconv.ParseBool(subValue["isSpam"])
+			respId := stringToInt64(subValue["id"])
 
-			tempMsg := map[string]interface{}{
-				"date":          subValue["date"],
-				"dislikes":      respDislikes,
-				"forum":         subValue["forum"],
-				"id":            respId,
-				"isApproved":    respIsApproved,
-				"isDeleted":     respIsDeleted,
-				"isEdited":      respIsEdited,
-				"isHighlighted": respIsHighlighted,
-				"isSpam":        respIsSpam,
-				"likes":         respLikes,
-				"message":       subValue["message"],
-				"parent":        nil,
-				"points":        respPoints,
-				"thread":        respThread,
-				"user":          subValue["user"],
+			tempMsg := &rs.PostDetails{
+				Date:          subValue["date"],
+				Dislikes:      stringToInt64(subValue["dislikes"]),
+				Forum:         subValue["forum"],
+				Id:            respId,
+				IsApproved:    stringToBool(subValue["isApproved"]),
+				IsHighlighted: stringToBool(subValue["isHighlighted"]),
+				IsEdited:      stringToBool(subValue["isEdited"]),
+				IsSpam:        stringToBool(subValue["isSpam"]),
+				IsDeleted:     stringToBool(subValue["isDeleted"]),
+				Likes:         stringToInt64(subValue["likes"]),
+				Message:       subValue["message"],
+				Parent:        nil,
+				Points:        stringToInt64(subValue["points"]),
+				Thread:        stringToInt64(subValue["thread"]),
+				User:          subValue["user"],
 			}
 
 			p := Post{inputRequest: t.inputRequest, db: t.db}
 			parent := p.getParentId(respId, subValue["parent"])
 			if parent == int(respId) {
-				tempMsg["parent"] = nil
+				tempMsg.Parent = nil
 			} else {
-				tempMsg["parent"] = parent
+				tempParent := int64(parent)
+				tempMsg.Parent = &tempParent
 			}
-			responseMsg = append(responseMsg, tempMsg)
+
+			responseMsg.Posts = append(responseMsg.Posts, *tempMsg)
 		}
 	}
 
 	return responseCode, responseMsg
 }
 
+// +
 func (t *Thread) listPosts() string {
 	var query, order, sort, resp string
-
 	parentTree := false
-	f := false
-	var args []interface{}
+	args := Args{}
 
 	// Validate query values
 	if len(t.inputRequest.query["thread"]) == 1 {
 		query = "SELECT * FROM post WHERE thread = ?"
-		args = append(args, t.inputRequest.query["thread"][0])
-
-		f = true
-	}
-
-	if f == false {
-		resp = createInvalidResponse()
-		return resp
+		args.append(t.inputRequest.query["thread"][0])
+	} else {
+		return createInvalidResponse()
 	}
 
 	// order by here
 	if len(t.inputRequest.query["order"]) >= 1 {
 		orderType := t.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
-			resp = createInvalidResponse()
-			return resp
+			return createInvalidResponse()
 		}
 		order = orderType
 	} else {
@@ -1984,37 +1967,28 @@ func (t *Thread) listPosts() string {
 	}
 
 	var responseCode int
-	var responseMsg []map[string]interface{}
+	responseMsg := &rs.PostList{}
+
 	// simple sort
 	if parentTree == false {
 		p := Post{inputRequest: t.inputRequest, db: t.db}
-		responseCode, responseMsg = p.getList(query, sort, args)
+		responseCode, responseMsg = p._getList(query, sort, args)
 	} else {
 		// parent_tree sort
 		responseCode, responseMsg = t.parentTree(order)
 	}
 
 	// check responseCode
-	if responseCode == 100500 {
-		resp = createInvalidResponse()
-		return resp
-	} else if responseCode == 1 {
-		// E6ANYI KOSTYL`
-		test := make(map[string]interface{})
-		resp, _ = createResponse(0, test)
-		return resp
-
-		// resp, _ = createResponse(responseCode, responseMsg[0])
-		// return resp
-	} else if responseCode == 0 {
-		resp, err := createResponseFromArray(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
+	if responseCode == 0 {
+		responseInterface := make([]interface{}, len(responseMsg.Posts))
+		for i, v := range responseMsg.Posts {
+			responseInterface[i] = v
 		}
-		return resp
+		resp, _ = _createResponseFromArray(responseCode, responseInterface)
+	} else if responseCode == 1 {
+		resp = becauseAPI()
 	} else {
 		resp = createInvalidResponse()
-		return resp
 	}
 
 	return resp
@@ -2493,7 +2467,7 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 	return resp
 }
 
-// -
+// delete
 func (p *Post) getPostDetails() (int, map[string]interface{}) {
 	query := "SELECT * FROM post WHERE id = ?"
 	var args []interface{}
@@ -2665,7 +2639,6 @@ func (p *Post) details() string {
 	return resp
 }
 
-// -
 func (p *Post) getArrayPostDetails(query string, args []interface{}) (int, []map[string]interface{}) {
 	getPost, err := selectQuery(query, &args, p.db)
 	if err != nil {
