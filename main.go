@@ -1830,6 +1830,7 @@ func (t *Thread) list() string {
 	return resp
 }
 
+// +
 func (t *Thread) parentTree(order string) (int, *rs.PostList) {
 	query := "SELECT parent FROM post WHERE thread = ?"
 	order = " ORDER BY parent " + order
@@ -2756,32 +2757,6 @@ func (p *Post) _getArrayPostDetails(query string, args Args) (int, *rs.PostList)
 	return responseCode, responseMsg
 }
 
-func (p *Post) getList(query string, order string, args []interface{}) (int, []map[string]interface{}) {
-	// Check and validate optional params
-	if len(p.inputRequest.query["since"]) >= 1 {
-		query += " AND date > ?"
-		args = append(args, p.inputRequest.query["since"][0])
-	}
-
-	query += order
-
-	if len(p.inputRequest.query["limit"]) >= 1 {
-		limitValue := p.inputRequest.query["limit"][0]
-		i, err := strconv.Atoi(limitValue)
-		if err != nil || i < 0 {
-			return 100500, nil
-		}
-		query += fmt.Sprintf(" LIMIT %d", i)
-	}
-
-	// Response here
-	responseCode, responseMsg := p.getArrayPostDetails(query, args)
-	if responseCode != 0 {
-		return responseCode, responseMsg
-	}
-	return responseCode, responseMsg
-}
-
 // +
 func (p *Post) _getList(query string, order string, args Args) (int, *rs.PostList) {
 	// Check and validate optional params
@@ -3000,32 +2975,32 @@ func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 // ==========================
 func statusHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	if inputRequest.method == "GET" {
-		var args []interface{}
+		args := Args{}
 
 		query := "SELECT COUNT(*) count FROM user"
-		dbResp, _ := selectQuery(query, &args, db)
-		respUsers, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+		dbResp, _ := selectQuery(query, &args.data, db)
+		respUsers := stringToInt64(dbResp.values[0]["count"])
 
 		query = "SELECT COUNT(*) count FROM thread"
-		dbResp, _ = selectQuery(query, &args, db)
-		respThreads, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+		dbResp, _ = selectQuery(query, &args.data, db)
+		respThreads := stringToInt64(dbResp.values[0]["count"])
 
 		query = "SELECT COUNT(*) count FROM forum"
-		dbResp, _ = selectQuery(query, &args, db)
-		respForums, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+		dbResp, _ = selectQuery(query, &args.data, db)
+		respForums := stringToInt64(dbResp.values[0]["count"])
 
 		query = "SELECT COUNT(*) count FROM post"
-		dbResp, _ = selectQuery(query, &args, db)
-		respPosts, _ := strconv.ParseInt(dbResp.values[0]["count"], 10, 64)
+		dbResp, _ = selectQuery(query, &args.data, db)
+		respPosts := stringToInt64(dbResp.values[0]["count"])
 
 		responseCode := 0
-		responseMsg := map[string]interface{}{
-			"user":   respUsers,
-			"thread": respThreads,
-			"forum":  respForums,
-			"post":   respPosts,
+		responseMsg := &rs.StatusHandler{
+			User:   respUsers,
+			Thread: respThreads,
+			Forum:  respForums,
+			Post:   respPosts,
 		}
-		resp, _ := createResponse(responseCode, responseMsg)
+		resp, _ := _createResponse(responseCode, responseMsg)
 
 		io.WriteString(w, resp)
 	}
@@ -3033,27 +3008,26 @@ func statusHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 
 func clearHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	if inputRequest.method == "POST" {
-		var args []interface{}
+		args := Args{}
 
 		query := "DELETE FROM follow"
-		_, _ = execQuery(query, &args, db)
+		_, _ = execQuery(query, &args.data, db)
 		query = "DELETE FROM subscribe"
-		_, _ = execQuery(query, &args, db)
-
+		_, _ = execQuery(query, &args.data, db)
 		query = "DELETE FROM post WHERE id > 0"
-		_, _ = execQuery(query, &args, db)
+		_, _ = execQuery(query, &args.data, db)
 		query = "DELETE FROM thread WHERE id > 0"
-		_, _ = execQuery(query, &args, db)
+		_, _ = execQuery(query, &args.data, db)
 		query = "DELETE FROM forum WHERE id > 0"
-		_, _ = execQuery(query, &args, db)
+		_, _ = execQuery(query, &args.data, db)
 		query = "DELETE FROM user WHERE id > 0"
-		_, _ = execQuery(query, &args, db)
+		_, _ = execQuery(query, &args.data, db)
 
 		responseCode := 0
 
-		cacheContent := map[string]interface{}{
-			"code":     responseCode,
-			"response": "OK",
+		cacheContent := &rs.ClearHandler{
+			Code:     int64(responseCode),
+			Response: "OK",
 		}
 
 		str, _ := json.Marshal(cacheContent)

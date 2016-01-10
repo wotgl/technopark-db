@@ -361,3 +361,19 @@ type ErrorMsg struct {
 }
 
 func (instance *ErrorMsg) Foo() bool { return true }
+
+type StatusHandler struct {
+	User   int64 `json:"user"`
+	Thread int64 `json:"thread"`
+	Forum  int64 `json:"forum"`
+	Post   int64 `json:"post"`
+}
+
+func (instance *StatusHandler) Foo() bool { return true }
+
+type ClearHandler struct {
+	Code     int64  `json:"code"`
+	Response string `json:"response"`
+}
+
+func (instance *ClearHandler) Foo() bool { return true }
