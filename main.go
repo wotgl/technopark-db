@@ -331,7 +331,7 @@ func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, er
 	if err != nil {
 		return nil, err
 	}
-	log.Printf("ID = %d, affected = %d\n", lastId, rowCnt)
+	// log.Printf("ID = %d, affected = %d\n", lastId, rowCnt)
 
 	resp.lastId = lastId
 	resp.rowCount = rowCnt
@@ -2210,7 +2210,9 @@ func (p *Post) create() string {
 		// find parent and last child
 		parent := p.inputRequest.json["parent"].(float64)
 
-		parentQuery := "SELECT id, parent FROM post WHERE id = ? && isDeleted = false"
+		fmt.Println("Need parent:\t", parent)
+
+		parentQuery := "SELECT id, parent FROM post WHERE id = ?"
 
 		parentArgs := Args{}
 		parentArgs.append(parent)
@@ -2242,17 +2244,17 @@ func (p *Post) create() string {
 		// because the first element is parent
 		if getThread.rows == 1 {
 			newParent := getParent
-			newChild := toBase95(1)
+			newChild := toBase93(1)
 
 			child = newParent + newChild
 		} else {
 			lastChild := getThread.values[getThread.rows-1]["parent"]
 			newParent := getParent
-			oldChild := fromBase95(lastChild[len(lastChild)-5:])
+			oldChild := fromBase93(lastChild[len(lastChild)-5:])
 
 			oldChild++
 
-			newChild := toBase95(oldChild)
+			newChild := toBase93(oldChild)
 
 			child = newParent + newChild
 		}
@@ -2269,12 +2271,14 @@ func (p *Post) create() string {
 		return createErrorResponse(err)
 	}
 
+	fmt.Println("Create post with id:\t", dbResp.lastId)
+
 	// maybe goroutine?
 	if boolParent {
 		boolParentQuery := "UPDATE post SET parent = ? WHERE id = ?"
 		boolParentArgs := Args{}
 
-		parent := toBase95(int(dbResp.lastId))
+		parent := toBase93(int(dbResp.lastId))
 		boolParentArgs.append(parent)
 		boolParentArgs.append(dbResp.lastId)
 
@@ -2308,7 +2312,7 @@ func (p *Post) create() string {
 		panic(err.Error())
 	}
 
-	fmt.Println("post.create()")
+	// fmt.Println("post.create()")
 
 	return resp
 }
@@ -2318,7 +2322,7 @@ func (p *Post) getParentId(id int64, path string) int {
 	if len(path) == 5 {
 		return int(id)
 	} else if len(path) == 10 {
-		return fromBase95(path[len(path)-10 : len(path)-5])
+		return fromBase93(path[len(path)-10 : len(path)-5])
 	} else {
 		parentId := path[:len(path)-5]
 
@@ -2852,6 +2856,8 @@ func main() {
 
 	if err != nil {
 		panic(err.Error())
+	} else {
+		fmt.Println("db ok")
 	}
 	defer db.Close()
 
@@ -2933,14 +2939,14 @@ func incInt(value *int) int {
 	return *value
 }
 
-func toBase95(value int) string {
-	BASE95 := ` !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
+func toBase93(value int) string {
+	BASE93 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
 	length := 5
-	base := len(BASE95)
+	base := len(BASE93)
 	result := make([]byte, 5)
 
 	for i := 0; i < length; i++ {
-		result[i] = BASE95[0]
+		result[i] = BASE93[0]
 	}
 
 	if value == 0 {
@@ -2951,7 +2957,7 @@ func toBase95(value int) string {
 	for value != 0 {
 		mod := value % base
 
-		result[length-counter-1] = BASE95[mod]
+		result[length-counter-1] = BASE93[mod]
 		counter++
 
 		value = value / base
@@ -2960,16 +2966,16 @@ func toBase95(value int) string {
 	return string(result)
 }
 
-func fromBase95(value string) int {
-	BASE95 := ` !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
+func fromBase93(value string) int {
+	BASE93 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
 	length := 5
-	base := len(BASE95)
+	base := len(BASE93)
 	var result int
 
 	counter := 0
 	step := 1
 	for i := 0; i < length; i++ {
-		index := strings.Index(BASE95, string(value[length-counter-1]))
+		index := strings.Index(BASE93, string(value[length-counter-1]))
 		counter++
 
 		result = result + index*step
