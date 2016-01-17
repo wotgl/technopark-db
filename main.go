@@ -1545,16 +1545,6 @@ func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.Thre
 	responseMsg := &rs.ThreadList{Threads: responseArray}
 
 	for _, value := range getThread.values {
-		// countQuery := "SELECT COUNT(*) posts FROM post p WHERE p.thread = ? AND p.isDeleted = false"
-
-		// countArgs := Args{}
-		// countArgs.append(value["id"])
-
-		// getCount, err := selectQuery(countQuery, &countArgs.data, t.db)
-		// if err != nil {
-		// 	log.Panic(err)
-		// }
-
 		tempMsg := &rs.ThreadDetails{
 			Date:      value["date"],
 			Dislikes:  stringToInt64(value["dislikes"]),
