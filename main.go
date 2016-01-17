@@ -1545,15 +1545,15 @@ func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.Thre
 	responseMsg := &rs.ThreadList{Threads: responseArray}
 
 	for _, value := range getThread.values {
-		countQuery := "SELECT COUNT(*) posts FROM post p WHERE p.thread = ? AND p.isDeleted = false"
+		// countQuery := "SELECT COUNT(*) posts FROM post p WHERE p.thread = ? AND p.isDeleted = false"
 
-		countArgs := Args{}
-		countArgs.append(value["id"])
+		// countArgs := Args{}
+		// countArgs.append(value["id"])
 
-		getCount, err := selectQuery(countQuery, &countArgs.data, t.db)
-		if err != nil {
-			log.Panic(err)
-		}
+		// getCount, err := selectQuery(countQuery, &countArgs.data, t.db)
+		// if err != nil {
+		// 	log.Panic(err)
+		// }
 
 		tempMsg := &rs.ThreadDetails{
 			Date:      value["date"],
@@ -1565,7 +1565,7 @@ func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.Thre
 			Likes:     stringToInt64(value["likes"]),
 			Message:   value["message"],
 			Points:    stringToInt64(value["points"]),
-			Posts:     stringToInt64(getCount.values[0]["posts"]),
+			Posts:     stringToInt64(value["posts"]),
 			Slug:      value["slug"],
 			Title:     value["title"],
 			User:      value["user"],
@@ -2190,6 +2190,25 @@ type Post struct {
 	db           *sql.DB
 }
 
+func (p *Post) threadCounter(operation string, thread string, isDeleted bool) {
+	var query string
+	args := Args{}
+	args.append(thread)
+
+	switch operation {
+	case "create":
+		if isDeleted == false {
+			query = "UPDATE thread SET posts = posts + 1 WHERE id = ?"
+		}
+	case "remove":
+		query = "UPDATE thread SET posts = posts - 1 WHERE id = ?"
+	case "restore":
+		query = "UPDATE thread SET posts = posts + 1 WHERE id = ?"
+
+	}
+	_, _ = execQuery(query, &args.data, p.db)
+}
+
 // +
 func (p *Post) create() string {
 	var resp string
@@ -2293,6 +2312,11 @@ func (p *Post) create() string {
 		_, _ = execQuery(boolParentQuery, &boolParentArgs.data, p.db)
 	}
 
+	// thread + isDeleted
+	isDeleted := p.inputRequest.json["isDeleted"].(bool)
+	thread := floatToString(p.inputRequest.json["thread"].(float64))
+	go p.threadCounter("create", thread, isDeleted)
+
 	tempCounter := 5
 	responseCode := 0
 	responseMsg := &rs.PostCreate{
@@ -2347,16 +2371,17 @@ func (p *Post) getParentId(id int64, path string) int {
 }
 
 // +
-func (p *Post) updateBoolBasic(query string, value bool) string {
+// Return true if need threadCounter()
+func (p *Post) updateBoolBasic(query string, value bool) (bool, string) {
 	var resp string
 	args := Args{}
 
 	if !validateJson(p.inputRequest, "post") {
-		return createInvalidJsonResponse(p.inputRequest)
+		return false, createInvalidJsonResponse(p.inputRequest)
 	}
 
 	if checkFloat64Type(p.inputRequest.json["post"]) == false {
-		return createInvalidJsonResponse(p.inputRequest)
+		return false, createInvalidJsonResponse(p.inputRequest)
 	}
 
 	postId := p.inputRequest.json["post"].(float64)
@@ -2365,7 +2390,7 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 
 	dbResp, err := execQuery(query, &args.data, p.db)
 	if err != nil {
-		return createErrorResponse(err)
+		return false, createErrorResponse(err)
 	}
 
 	if dbResp.rowCount == 0 {
@@ -2375,14 +2400,14 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 		responseCode, responseMsg := p._getPostDetails(postArgs)
 
 		if responseCode != 0 {
-			return createNotExistResponse()
+			return false, createNotExistResponse()
 		}
 
 		resp, err = _createResponse(responseCode, responseMsg)
 		if err != nil {
 			panic(err.Error())
 		}
-		return resp
+		return false, resp
 	}
 
 	responseCode := 0
@@ -2395,7 +2420,7 @@ func (p *Post) updateBoolBasic(query string, value bool) string {
 		panic(err.Error())
 	}
 
-	return resp
+	return true, resp
 }
 
 // +
@@ -2643,7 +2668,14 @@ func (p *Post) list() string {
 func (p *Post) remove() string {
 	query := "UPDATE post SET isDeleted = ? WHERE id = ?"
 
-	resp := p.updateBoolBasic(query, true)
+	check, resp := p.updateBoolBasic(query, true)
+	if check {
+		args := Args{}
+		args.append(p.inputRequest.json["post"])
+		_, responseMsg := p._getPostDetails(args)
+		thread := int64ToString(responseMsg.Thread.(int64))
+		go p.threadCounter("remove", thread, true)
+	}
 
 	return resp
 }
@@ -2652,7 +2684,14 @@ func (p *Post) remove() string {
 func (p *Post) restore() string {
 	query := "UPDATE post SET isDeleted = ? WHERE id = ?"
 
-	resp := p.updateBoolBasic(query, false)
+	check, resp := p.updateBoolBasic(query, false)
+	if check {
+		args := Args{}
+		args.append(p.inputRequest.json["post"])
+		_, responseMsg := p._getPostDetails(args)
+		thread := int64ToString(responseMsg.Thread.(int64))
+		go p.threadCounter("restore", thread, false)
+	}
 
 	return resp
 }
