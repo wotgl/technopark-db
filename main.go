@@ -310,7 +310,7 @@ type ExecResponse struct {
 	rowCount int64
 }
 
-func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, error) {
+func _execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, error) {
 	resp := new(ExecResponse)
 
 	stmt, err := db.Prepare(query)
@@ -323,6 +323,45 @@ func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, er
 	if err != nil {
 		return nil, err
 	}
+	lastId, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	rowCnt, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	// log.Printf("ID = %d, affected = %d\n", lastId, rowCnt)
+
+	resp.lastId = lastId
+	resp.rowCount = rowCnt
+
+	return resp, nil
+}
+
+func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, error) {
+	resp := new(ExecResponse)
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+
+	defer tx.Commit()
+
+	stmt, err := tx.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+
+	res, err := stmt.Exec(*args...)
+	if err != nil {
+		return nil, err
+	}
+
+	// err = tx.Commit()
+
 	lastId, err := res.LastInsertId()
 	if err != nil {
 		return nil, err
@@ -1181,7 +1220,7 @@ func (f *Forum) listPosts() string {
 		if relatedThread {
 			t := Thread{inputRequest: f.inputRequest, db: f.db}
 			threadArgs := Args{}
-			threadArgs.append(responseMsg.Posts[key].Thread, responseMsg.Posts[key].Thread)
+			threadArgs.append(responseMsg.Posts[key].Thread)
 
 			_, responseThread := t._getThreadDetails(threadArgs)
 			responseMsg.Posts[key].Thread = responseThread
@@ -1212,10 +1251,10 @@ func (f *Forum) listPosts() string {
 
 // +
 func (f *Forum) listUsers() string {
-	var resp string
+	var resp, query string
 	args := Args{}
 
-	query := "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
+	query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
 
 	// Validate query values
 	if len(f.inputRequest.query["forum"]) != 1 {
@@ -1347,7 +1386,7 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 
 	if dbResp.rowCount == 0 {
 		threadArgs := Args{}
-		threadArgs.append(threadId, threadId)
+		threadArgs.append(threadId)
 		responseCode, responseMsg := t._getThreadDetails(threadArgs)
 
 		if responseCode != 0 {
@@ -1447,8 +1486,13 @@ func (t *Thread) create() string {
 // +
 func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
 	// query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"		// FIX
-	query := "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = ? AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
+	query := "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
+	countQuery := "SELECT COUNT(*) posts FROM post p WHERE p.thread = ? AND p.isDeleted = false"
 
+	getCount, err := selectQuery(countQuery, &args.data, t.db)
+	if err != nil {
+		log.Panic(err)
+	}
 	getThread, err := selectQuery(query, &args.data, t.db)
 	if err != nil {
 		log.Panic(err)
@@ -1472,58 +1516,10 @@ func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
 		Likes:     stringToInt64(getThread.values[0]["likes"]),
 		Message:   getThread.values[0]["message"],
 		Points:    stringToInt64(getThread.values[0]["points"]),
-		Posts:     stringToInt64(getThread.values[0]["posts"]),
+		Posts:     stringToInt64(getCount.values[0]["posts"]),
 		Slug:      getThread.values[0]["slug"],
 		Title:     getThread.values[0]["title"],
 		User:      getThread.values[0]["user"],
-	}
-
-	return responseCode, responseMsg
-}
-
-// Rewrite subquery
-func (t *Thread) getThreadDetails() (int, map[string]interface{}) {
-	// query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"		// FIX
-	query := "SELECT t.*, (SELECT COUNT(*) FROM post p WHERE p.thread = ? AND p.isDeleted = false) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
-	var args []interface{}
-	args = append(args, t.inputRequest.query["thread"][0])
-	args = append(args, t.inputRequest.query["thread"][0])
-
-	getThread, err := selectQuery(query, &args, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	if getThread.rows == 0 {
-		responseCode := 1
-		errorMessage := map[string]interface{}{"msg": "Not found"}
-
-		return responseCode, errorMessage
-	}
-
-	respId, _ := strconv.ParseInt(getThread.values[0]["id"], 10, 64)
-	respLikes, _ := strconv.ParseInt(getThread.values[0]["likes"], 10, 64)
-	respDislikes, _ := strconv.ParseInt(getThread.values[0]["dislikes"], 10, 64)
-	respPoints, _ := strconv.ParseInt(getThread.values[0]["points"], 10, 64)
-	respPosts, _ := strconv.ParseInt(getThread.values[0]["posts"], 10, 64)
-	respIsClosed, _ := strconv.ParseBool(getThread.values[0]["isClosed"])
-	respIsDeleted, _ := strconv.ParseBool(getThread.values[0]["isDeleted"])
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"date":      getThread.values[0]["date"],
-		"dislikes":  respDislikes,
-		"forum":     getThread.values[0]["forum"],
-		"id":        respId,
-		"isClosed":  respIsClosed,
-		"isDeleted": respIsDeleted,
-		"likes":     respLikes,
-		"message":   getThread.values[0]["message"],
-		"points":    respPoints,
-		"posts":     respPosts,
-		"slug":      getThread.values[0]["slug"],
-		"title":     getThread.values[0]["title"],
-		"user":      getThread.values[0]["user"],
 	}
 
 	return responseCode, responseMsg
@@ -1632,7 +1628,7 @@ func (t *Thread) details() string {
 		return createInvalidResponse()
 	}
 	args := Args{}
-	args.append(t.inputRequest.query["thread"][0], t.inputRequest.query["thread"][0])
+	args.append(t.inputRequest.query["thread"][0])
 
 	if len(t.inputRequest.query["related"]) >= 1 && stringInSlice("user", t.inputRequest.query["related"]) {
 		relatedUser = true
@@ -2068,7 +2064,7 @@ func (t *Thread) update() string {
 	}
 
 	threadArgs := Args{}
-	threadArgs.append(threadId, threadId)
+	threadArgs.append(threadId)
 	responseCode, responseMsg := t._getThreadDetails(threadArgs)
 
 	if responseCode != 0 {
@@ -2114,7 +2110,7 @@ func (t *Thread) vote() string {
 	}
 
 	threadArgs := Args{}
-	threadArgs.append(threadId, threadId)
+	threadArgs.append(threadId)
 	responseCode, responseMsg := t._getThreadDetails(threadArgs)
 
 	if responseCode != 0 {
@@ -2233,6 +2229,7 @@ func (p *Post) create() string {
 		var child string
 		getParent := getThread.values[0]["parent"]
 
+		// OPTIMIZATION HERE: ADD LIMIT!!!
 		parentQuery = "SELECT parent FROM post WHERE parent LIKE ?"
 		parentArgs.append(getParent + "%")
 
@@ -2244,17 +2241,17 @@ func (p *Post) create() string {
 		// because the first element is parent
 		if getThread.rows == 1 {
 			newParent := getParent
-			newChild := toBase93(1)
+			newChild := toBase92(1)
 
 			child = newParent + newChild
 		} else {
 			lastChild := getThread.values[getThread.rows-1]["parent"]
 			newParent := getParent
-			oldChild := fromBase93(lastChild[len(lastChild)-5:])
+			oldChild := fromBase92(lastChild[len(lastChild)-5:])
 
 			oldChild++
 
-			newChild := toBase93(oldChild)
+			newChild := toBase92(oldChild)
 
 			child = newParent + newChild
 		}
@@ -2278,7 +2275,7 @@ func (p *Post) create() string {
 		boolParentQuery := "UPDATE post SET parent = ? WHERE id = ?"
 		boolParentArgs := Args{}
 
-		parent := toBase93(int(dbResp.lastId))
+		parent := toBase92(int(dbResp.lastId))
 		boolParentArgs.append(parent)
 		boolParentArgs.append(dbResp.lastId)
 
@@ -2322,7 +2319,7 @@ func (p *Post) getParentId(id int64, path string) int {
 	if len(path) == 5 {
 		return int(id)
 	} else if len(path) == 10 {
-		return fromBase93(path[len(path)-10 : len(path)-5])
+		return fromBase92(path[len(path)-10 : len(path)-5])
 	} else {
 		parentId := path[:len(path)-5]
 
@@ -2480,7 +2477,7 @@ func (p *Post) details() string {
 		t := Thread{inputRequest: p.inputRequest, db: p.db}
 
 		threadArgs := Args{}
-		threadArgs.append(responseMsg.Thread, responseMsg.Thread)
+		threadArgs.append(responseMsg.Thread)
 		_, threadDetails := t._getThreadDetails(threadArgs)
 
 		responseMsg.Thread = threadDetails
@@ -2867,22 +2864,34 @@ func main() {
 		panic(err.Error())
 	}
 
-	MAX_DB_CONNECTIONS := 2
+	argsWithProg := os.Args[1:]
+
+	MAX_DB_CONNECTIONS := int(stringToInt64(argsWithProg[1]))
 
 	db.SetMaxOpenConns(MAX_DB_CONNECTIONS)
 
-	PORT := ":8000"
+	PORT := ":" + argsWithProg[0]
 
 	fmt.Printf("The server is running on http://localhost%s\n", PORT)
 
 	// go initLog()
+
+	// config here
+	f, err := os.Open("app.conf")
+	check(err)
+	conf := make([]byte, 10)
+	_, err = f.Read(conf)
+	check(err)
+
+	if strings.Split(string(conf), "=")[1][:1] == "1" {
+		http.HandleFunc("/db/api/clear/", makeHandler(db, clearHandler))
+	}
 
 	http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
 	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
 	http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
 	http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
 	http.HandleFunc("/db/api/status/", makeHandler(db, statusHandler))
-	http.HandleFunc("/db/api/clear/", makeHandler(db, clearHandler))
 
 	http.ListenAndServe(PORT, nil)
 }
@@ -2890,6 +2899,12 @@ func main() {
 // =================
 // Utils here
 // =================
+
+func check(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
 
 func floatToString(inputNum float64) string {
 	// to convert a float number to a string
@@ -2939,14 +2954,14 @@ func incInt(value *int) int {
 	return *value
 }
 
-func toBase93(value int) string {
-	BASE93 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
+func toBase92(value int) string {
+	BASE92 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
 	length := 5
-	base := len(BASE93)
+	base := len(BASE92)
 	result := make([]byte, 5)
 
 	for i := 0; i < length; i++ {
-		result[i] = BASE93[0]
+		result[i] = BASE92[0]
 	}
 
 	if value == 0 {
@@ -2957,7 +2972,7 @@ func toBase93(value int) string {
 	for value != 0 {
 		mod := value % base
 
-		result[length-counter-1] = BASE93[mod]
+		result[length-counter-1] = BASE92[mod]
 		counter++
 
 		value = value / base
@@ -2966,16 +2981,16 @@ func toBase93(value int) string {
 	return string(result)
 }
 
-func fromBase93(value string) int {
-	BASE93 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
+func fromBase92(value string) int {
+	BASE92 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
 	length := 5
-	base := len(BASE93)
+	base := len(BASE92)
 	var result int
 
 	counter := 0
 	step := 1
 	for i := 0; i < length; i++ {
-		index := strings.Index(BASE93, string(value[length-counter-1]))
+		index := strings.Index(BASE92, string(value[length-counter-1]))
 		counter++
 
 		result = result + index*step
