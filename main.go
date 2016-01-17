@@ -1254,7 +1254,8 @@ func (f *Forum) listUsers() string {
 	var resp, query string
 	args := Args{}
 
-	query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
+	// query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
+	query = "SELECT u.email FROM user u WHERE email IN (SELECT DISTINCT p.user FROM post p WHERE p.forum = ?)"
 
 	// Validate query values
 	if len(f.inputRequest.query["forum"]) != 1 {
@@ -1306,7 +1307,7 @@ func (f *Forum) listUsers() string {
 	for _, value := range users.values {
 		u := User{inputRequest: f.inputRequest, db: f.db}
 		userArgs := Args{}
-		userArgs.append(value["user"])
+		userArgs.append(value["email"])
 
 		_, responseUser := u._getUserDetails(userArgs)
 
