@@ -1486,14 +1486,8 @@ func (t *Thread) create() string {
 // Rewrite subquery
 // +
 func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
-	// query := "SELECT t.*, COUNT(*) posts FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"		// FIX
 	query := "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
-	countQuery := "SELECT COUNT(*) posts FROM post p WHERE p.thread = ? AND p.isDeleted = false"
 
-	getCount, err := selectQuery(countQuery, &args.data, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
 	getThread, err := selectQuery(query, &args.data, t.db)
 	if err != nil {
 		log.Panic(err)
@@ -1517,7 +1511,7 @@ func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
 		Likes:     stringToInt64(getThread.values[0]["likes"]),
 		Message:   getThread.values[0]["message"],
 		Points:    stringToInt64(getThread.values[0]["points"]),
-		Posts:     stringToInt64(getCount.values[0]["posts"]),
+		Posts:     stringToInt64(getThread.values[0]["posts"]),
 		Slug:      getThread.values[0]["slug"],
 		Title:     getThread.values[0]["title"],
 		User:      getThread.values[0]["user"],
@@ -1921,7 +1915,7 @@ func (t *Thread) open() string {
 
 // +
 func (t *Thread) remove() string {
-	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
+	query := "UPDATE thread SET isDeleted = ?, posts = 0 WHERE id = ?"
 
 	resp := t.updateBoolBasic(query, true)
 
@@ -1934,13 +1928,13 @@ func (t *Thread) remove() string {
 
 // +
 func (t *Thread) restore() string {
-	query := "UPDATE thread SET isDeleted = ? WHERE id = ?"
-
-	resp := t.updateBoolBasic(query, false)
-
-	query = "UPDATE post SET isDeleted = ? WHERE thread = ?"
+	query := "UPDATE post SET isDeleted = ? WHERE thread = ?"
 
 	_ = t.updateBoolBasic(query, false)
+
+	query = "UPDATE thread t SET t.isDeleted = ?, t.posts = (SELECT COUNT(*) FROM post p WHERE p.thread = t.id) WHERE t.id = ?"
+
+	resp := t.updateBoolBasic(query, false)
 
 	return resp
 }
@@ -2305,7 +2299,7 @@ func (p *Post) create() string {
 	// thread + isDeleted
 	isDeleted := p.inputRequest.json["isDeleted"].(bool)
 	thread := floatToString(p.inputRequest.json["thread"].(float64))
-	go p.threadCounter("create", thread, isDeleted)
+	p.threadCounter("create", thread, isDeleted)
 
 	tempCounter := 5
 	responseCode := 0
@@ -2664,7 +2658,7 @@ func (p *Post) remove() string {
 		args.append(p.inputRequest.json["post"])
 		_, responseMsg := p._getPostDetails(args)
 		thread := int64ToString(responseMsg.Thread.(int64))
-		go p.threadCounter("remove", thread, true)
+		p.threadCounter("remove", thread, true)
 	}
 
 	return resp
@@ -2680,7 +2674,7 @@ func (p *Post) restore() string {
 		args.append(p.inputRequest.json["post"])
 		_, responseMsg := p._getPostDetails(args)
 		thread := int64ToString(responseMsg.Thread.(int64))
-		go p.threadCounter("restore", thread, false)
+		p.threadCounter("restore", thread, false)
 	}
 
 	return resp
