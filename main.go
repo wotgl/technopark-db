@@ -891,20 +891,12 @@ func (f *Forum) create() string {
 		return createErrorResponse(err)
 	}
 
-	query = "SELECT * FROM forum WHERE id = ?"
-	args.clear()
-	args.append(dbResp.lastId)
-	newForum, err := selectQuery(query, &args.data, f.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
 	responseCode := 0
 	responseMsg := &rs.ForumCreate{
-		Name:       newForum.values[0]["name"],
-		Short_Name: newForum.values[0]["short_name"],
+		Name:       f.inputRequest.json["name"].(string),
+		Short_Name: f.inputRequest.json["short_name"].(string),
 		Id:         dbResp.lastId,
-		User:       newForum.values[0]["user"],
+		User:       f.inputRequest.json["user"].(string),
 	}
 
 	resp, err = _createResponse(responseCode, responseMsg)
@@ -1354,7 +1346,7 @@ func (t *Thread) create() string {
 // Rewrite subquery
 // +
 func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
-	query := "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.id = ?"
+	query := "SELECT t.* FROM thread t WHERE t.id = ?"
 
 	getThread, err := selectQuery(query, &args.data, t.db)
 	if err != nil {
@@ -1489,11 +1481,9 @@ func (t *Thread) listBasic() (int, *rs.ThreadList) {
 
 	// Validate query values
 	if len(t.inputRequest.query["user"]) == 1 {
-		// query = "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
 		query = "SELECT t.* FROM thread t WHERE t.user = ?"
 		args.append(t.inputRequest.query["user"][0])
 	} else if len(t.inputRequest.query["forum"]) == 1 {
-		// query = "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
 		query = "SELECT t.* FROM thread t WHERE t.forum = ?"
 		args.append(t.inputRequest.query["forum"][0])
 	} else {
@@ -1506,7 +1496,6 @@ func (t *Thread) listBasic() (int, *rs.ThreadList) {
 		args.append(t.inputRequest.query["since"][0])
 	}
 
-	// query = query + " GROUP BY t.id"
 	if len(t.inputRequest.query["order"]) >= 1 {
 		orderType := t.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
@@ -1648,6 +1637,8 @@ func (t *Thread) parentTree(order string) (int, *rs.PostList) {
 		}
 	}
 
+	fmt.Println("Thread.parentTree()")
+
 	return responseCode, responseMsg
 }
 
@@ -1690,6 +1681,8 @@ func (t *Thread) listPosts() string {
 		default:
 			return createInvalidResponse()
 		}
+
+		fmt.Println("sortType =", sortType)
 	} else {
 		sort = " ORDER BY date " + order
 	}
