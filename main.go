@@ -2780,11 +2780,11 @@ func main() {
 		http.HandleFunc("/db/api/clear/", makeHandler(db, clearHandler))
 	}
 
-	go http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
-	go http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
-	go http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
-	go http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
-	go http.HandleFunc("/db/api/status/", makeHandler(db, statusHandler))
+	http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
+	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
+	http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
+	http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
+	http.HandleFunc("/db/api/status/", makeHandler(db, statusHandler))
 
 	http.ListenAndServe(PORT, nil)
 }
