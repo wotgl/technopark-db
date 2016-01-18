@@ -58,7 +58,7 @@ func (ir *InputRequest) parse(r *http.Request) {
 	ir.query = r.URL.Query()
 }
 
-func createResponse(code int, response map[string]interface{}) (string, error) {
+func _createResponse(code int, response rs.RespStruct) string {
 	content := map[string]interface{}{
 		"code":     code,
 		"response": response,
@@ -67,28 +67,13 @@ func createResponse(code int, response map[string]interface{}) (string, error) {
 	str, err := json.Marshal(content)
 	if err != nil {
 		log.Println("Error encoding JSON")
-		return "", err
+		log.Panic(err)
 	}
 
-	return string(str), nil
+	return string(str)
 }
 
-func _createResponse(code int, response rs.RespStruct) (string, error) {
-	content := map[string]interface{}{
-		"code":     code,
-		"response": response,
-	}
-
-	str, err := json.Marshal(content)
-	if err != nil {
-		log.Println("Error encoding JSON")
-		return "", err
-	}
-
-	return string(str), nil
-}
-
-func createResponseFromArray(code int, response []map[string]interface{}) (string, error) {
+func _createResponseFromArray(code int, response []interface{}) string {
 	cacheContent := map[string]interface{}{
 		"code":     code,
 		"response": response,
@@ -97,48 +82,33 @@ func createResponseFromArray(code int, response []map[string]interface{}) (strin
 	str, err := json.Marshal(cacheContent)
 	if err != nil {
 		log.Println("Error encoding JSON")
-		return "", err
+		log.Panic(err)
 	}
 
-	return string(str), nil
+	return string(str)
 }
 
-func _createResponseFromArray(code int, response []interface{}) (string, error) {
-	cacheContent := map[string]interface{}{
-		"code":     code,
-		"response": response,
-	}
-
-	str, err := json.Marshal(cacheContent)
-	if err != nil {
-		log.Println("Error encoding JSON")
-		return "", err
-	}
-
-	return string(str), nil
-}
-
-func errorExecParse(err error) (int, map[string]interface{}) {
+func errorExecParse(err error) (int, string) {
 	log.Println("Error:\t", err)
 	if driverErr, ok := err.(*mysql.MySQLError); ok { // Now the error number is accessible directly
 		var responseCode int
-		var errorMessage map[string]interface{}
+		var errorMessage string
 
 		switch driverErr.Number {
 		case 1062:
 			responseCode = 5
-			errorMessage = map[string]interface{}{"msg": "Exist"}
+			errorMessage = "Exist"
 
 		// Error 1452: Cannot add or update a child row: a foreign key constraint fails
 		case 1452:
 			responseCode = 5
-			errorMessage = map[string]interface{}{"msg": "Exist [Error 1452]"}
+			errorMessage = "Exist [Error 1452]"
 
 		default:
 			// fmt.Println("errorExecParse() default")
 			panic(err.Error())
 			responseCode = 4
-			errorMessage = map[string]interface{}{"msg": "Unknown Error"}
+			errorMessage = "Unknown Error"
 		}
 
 		return responseCode, errorMessage
@@ -147,57 +117,32 @@ func errorExecParse(err error) (int, map[string]interface{}) {
 }
 
 func createErrorResponse(err error) string {
-	responseCode, errorMessage := errorExecParse(err)
-
-	resp, err := createResponse(responseCode, errorMessage)
-	if err != nil {
-		log.Panic(err)
+	responseCode, msg := errorExecParse(err)
+	errorMessage := &rs.ErrorMsg{
+		Msg: msg,
 	}
 
-	return resp
-}
-
-func createNotFoundForArray() string {
-	var resp string
-	responseCode := 1
-	errorMessage := map[string]interface{}{
-		"msg": "Not found",
-	}
-
-	var responseMsg []map[string]interface{}
-
-	responseMsg = append(responseMsg, errorMessage)
-
-	resp, _ = createResponseFromArray(responseCode, responseMsg)
-	return resp
+	return _createResponse(responseCode, errorMessage)
 }
 
 func createInvalidQuery() string {
 	responseCode := 3
-	errorMessage := map[string]interface{}{
-		"msg": "Invalid query",
+	errorMessage := &rs.ErrorMsg{
+		Msg: "Invalid query",
 	}
 
-	resp, err := createResponse(responseCode, errorMessage)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponse(responseCode, errorMessage)
 }
 
 func createInvalidJsonResponse(inputRequest *InputRequest) string {
 	responseCode := 3
-	errorMessage := map[string]interface{}{"msg": "Invalid json"}
-
-	resp, err := createResponse(responseCode, errorMessage)
-	if err != nil {
-		log.Panic(err)
+	errorMessage := &rs.ErrorMsg{
+		Msg: "Invalid json",
 	}
 
 	log.Println("Invalid JSON:\turl=\tjson=", inputRequest.url, inputRequest.json)
 
-	return resp
+	return _createResponse(responseCode, errorMessage)
 }
 
 func checkError1062(err error) bool {
@@ -211,14 +156,11 @@ func checkError1062(err error) bool {
 
 func createInvalidResponse() string {
 	responseCode := 2
-	errorMessage := map[string]interface{}{"msg": "Invalid"}
-
-	resp, err := createResponse(responseCode, errorMessage)
-	if err != nil {
-		log.Panic(err)
+	errorMessage := &rs.ErrorMsg{
+		Msg: "Invalid",
 	}
 
-	return resp
+	return _createResponse(responseCode, errorMessage)
 }
 
 func createNotExistResponse() string {
@@ -227,20 +169,25 @@ func createNotExistResponse() string {
 		Msg: "Not exist",
 	}
 
-	resp, err := _createResponse(responseCode, errorMessage)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponse(responseCode, errorMessage)
 }
 
 // KOSTYL` API
 func becauseAPI() string {
 	kostyl := make(map[string]interface{})
-	resp, _ := createResponse(0, kostyl)
 
-	return resp
+	content := map[string]interface{}{
+		"code":     0,
+		"response": kostyl,
+	}
+
+	str, err := json.Marshal(content)
+	if err != nil {
+		log.Println("Error encoding JSON")
+		log.Panic(err)
+	}
+
+	return string(str)
 }
 
 func validateJson(ir *InputRequest, args ...string) bool {
@@ -297,9 +244,7 @@ func (args *Args) append(newData ...interface{}) {
 	}
 }
 
-func (args *Args) clear() {
-	args.data = args.data[0:0]
-}
+func (args *Args) clear() { args.data = args.data[0:0] }
 
 // ======================
 // Database queries here
@@ -354,7 +299,7 @@ type SelectResponse struct {
 	values  []map[string]string
 }
 
-func selectQuery(query string, args *[]interface{}, db *sql.DB) (*SelectResponse, error) {
+func selectQuery(query string, args *[]interface{}, db *sql.DB) *SelectResponse {
 	resp := new(SelectResponse)
 
 	/*
@@ -397,16 +342,14 @@ func selectQuery(query string, args *[]interface{}, db *sql.DB) (*SelectResponse
 	*/
 	rows, err := db.Query(query, *args...)
 	if err != nil {
-		panic(err.Error())
-		return nil, err
+		log.Panic(err)
 	}
 	defer rows.Close()
 
 	// Get column names
 	columns, err := rows.Columns()
 	if err != nil {
-		panic(err.Error())
-		return nil, err
+		log.Panic(err)
 	}
 
 	// Make a slice for the values
@@ -430,8 +373,7 @@ func selectQuery(query string, args *[]interface{}, db *sql.DB) (*SelectResponse
 		// get RawBytes from data
 		err = rows.Scan(scanArgs...)
 		if err != nil {
-			panic(err.Error())
-			return nil, err
+			log.Panic(err)
 		}
 
 		// Now do something with the data.
@@ -456,11 +398,10 @@ func selectQuery(query string, args *[]interface{}, db *sql.DB) (*SelectResponse
 	resp.rows = len(resp.values)
 
 	if err = rows.Err(); err != nil {
-		panic(err.Error()) // proper error handling instead of panic in your app
-		return nil, err
+		log.Panic(err)
 	}
 
-	return resp, nil
+	return resp
 }
 
 // =================
@@ -504,10 +445,7 @@ func (u *User) create() string {
 	query = "SELECT * FROM user WHERE id = ?"
 	args.clear()
 	args.append(dbResp.lastId)
-	newUser, err := selectQuery(query, &args.data, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	newUser := selectQuery(query, &args.data, u.db)
 
 	responseCode := 0
 	responseMsg := &rs.UserCreate{
@@ -519,10 +457,7 @@ func (u *User) create() string {
 		Username:    newUser.values[0]["username"],
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp = _createResponse(responseCode, responseMsg)
 
 	log.Printf("User '%s' created", responseMsg.Email)
 
@@ -533,10 +468,7 @@ func (u *User) create() string {
 func (u *User) _getUserDetails(args Args) (int, *rs.UserDetails) {
 	query := "SELECT * FROM user WHERE email = ?"
 
-	getUser, err := selectQuery(query, &args.data, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getUser := selectQuery(query, &args.data, u.db)
 
 	if getUser.rows == 0 {
 		responseCode := 1
@@ -591,10 +523,7 @@ func (u *User) getUserFollowers(followee string) []string {
 
 	// followers here
 	query := "SELECT follower FROM follow WHERE followee = ?"
-	getUserFollowers, err := selectQuery(query, &args.data, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getUserFollowers := selectQuery(query, &args.data, u.db)
 
 	listFollowers := make([]string, 0)
 	for _, value := range getUserFollowers.values {
@@ -611,10 +540,7 @@ func (u *User) getUserFollowing(follower string) []string {
 
 	// following here
 	query := "SELECT followee FROM follow WHERE follower = ?"
-	getUserFollowing, err := selectQuery(query, &args.data, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getUserFollowing := selectQuery(query, &args.data, u.db)
 
 	listFollowing := make([]string, 0)
 	for _, value := range getUserFollowing.values {
@@ -631,10 +557,7 @@ func (u *User) getUserSubscriptions(user string) []int {
 
 	// subscriptions here
 	query := "SELECT thread FROM subscribe WHERE user = ? ORDER BY thread asc"
-	getUserSubscriptions, err := selectQuery(query, &args.data, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getUserSubscriptions := selectQuery(query, &args.data, u.db)
 
 	listSubscriptions := make([]int, 0)
 	for _, value := range getUserSubscriptions.values {
@@ -646,7 +569,6 @@ func (u *User) getUserSubscriptions(user string) []int {
 
 // +
 func (u *User) getDetails() string {
-	var resp string
 	if len(u.inputRequest.query["user"]) != 1 {
 		return createInvalidResponse()
 	}
@@ -659,19 +581,11 @@ func (u *User) getDetails() string {
 		return createNotExistResponse()
 	}
 
-	resp, err := _createResponse(responseCode, responseMsg)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	// log.Printf("User '%s' get details", responseMsg)
-
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (u *User) follow() string {
-	var resp string
 	query := "INSERT INTO follow (follower, followee) VALUES(?, ?)"
 
 	args := Args{}
@@ -691,14 +605,13 @@ func (u *User) follow() string {
 
 			return u.getDetails()
 		}
-		responseCode, errorMessage := errorExecParse(err)
 
-		resp, err = createResponse(responseCode, errorMessage)
-		if err != nil {
-			log.Panic(err)
+		responseCode, msg := errorExecParse(err)
+		errorMessage := &rs.ErrorMsg{
+			Msg: msg,
 		}
 
-		return resp
+		return _createResponse(responseCode, errorMessage)
 	}
 
 	u.inputRequest.query["user"] = append(u.inputRequest.query["user"], u.inputRequest.json["follower"].(string))
@@ -707,7 +620,6 @@ func (u *User) follow() string {
 
 // +
 func (u *User) listBasic(query string) string {
-	var resp string
 	args := Args{}
 
 	// Validate query values
@@ -740,10 +652,7 @@ func (u *User) listBasic(query string) string {
 	}
 
 	// Prepare users
-	getUserFollowers, err := selectQuery(query, &args.data, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getUserFollowers := selectQuery(query, &args.data, u.db)
 
 	responseCode := 0
 	responseArray := make([]rs.UserDetails, 0)
@@ -793,28 +702,21 @@ func (u *User) listBasic(query string) string {
 		responseInterface[i] = v
 	}
 
-	resp, err = _createResponseFromArray(responseCode, responseInterface)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponseFromArray(responseCode, responseInterface)
 }
 
 // +
 func (u *User) listFollowers() string {
 	query := "SELECT u.* FROM user u JOIN follow f ON u.email = f.follower WHERE followee = ?"
 
-	resp := u.listBasic(query)
-	return resp
+	return u.listBasic(query)
 }
 
 // +
 func (u *User) listFollowing() string {
 	query := "SELECT u.* FROM user u JOIN follow f ON u.email = f.followee WHERE follower = ?"
 
-	resp := u.listBasic(query)
-	return resp
+	return u.listBasic(query)
 }
 
 // +
@@ -939,10 +841,7 @@ func (f *Forum) create() string {
 		User:       f.inputRequest.json["user"].(string),
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp = _createResponse(responseCode, responseMsg)
 
 	log.Printf("Forum '%s' created", responseMsg.Short_Name)
 
@@ -953,10 +852,7 @@ func (f *Forum) create() string {
 func (f *Forum) _getForumDetails(args Args) (int, *rs.ForumDetails) {
 	query := "SELECT * FROM forum WHERE short_name = ?"
 
-	getForum, err := selectQuery(query, &args.data, f.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getForum := selectQuery(query, &args.data, f.db)
 
 	if getForum.rows == 0 {
 		responseCode := 1
@@ -978,7 +874,6 @@ func (f *Forum) _getForumDetails(args Args) (int, *rs.ForumDetails) {
 
 // +
 func (f *Forum) details() string {
-	var resp string
 	var relatedUser bool
 
 	args := Args{}
@@ -1005,17 +900,11 @@ func (f *Forum) details() string {
 		responseMsg.User = userDetails
 	}
 
-	resp, err := _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (f *Forum) listThreads() string {
-	var resp string
 	relatedUser := false
 	relatedForum := false
 
@@ -1063,17 +952,12 @@ func (f *Forum) listThreads() string {
 		responseInterface[i] = v
 	}
 
-	resp, err := _createResponseFromArray(responseCode, responseInterface)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponseFromArray(responseCode, responseInterface)
 }
 
 // +
 func (f *Forum) listPosts() string {
-	var query, order, resp string
+	var query, order string
 	relatedUser := false
 	relatedThread := false
 	relatedForum := false
@@ -1155,17 +1039,12 @@ func (f *Forum) listPosts() string {
 		responseInterface[i] = v
 	}
 
-	resp, err := _createResponseFromArray(responseCode, responseInterface)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponseFromArray(responseCode, responseInterface)
 }
 
 // +
 func (f *Forum) listUsers() string {
-	var resp, query string
+	var query string
 	args := Args{}
 
 	// query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
@@ -1204,10 +1083,7 @@ func (f *Forum) listUsers() string {
 	}
 
 	// Query
-	users, err := selectQuery(query, &args.data, f.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	users := selectQuery(query, &args.data, f.db)
 
 	if users.rows == 0 {
 		return becauseAPI()
@@ -1233,12 +1109,8 @@ func (f *Forum) listUsers() string {
 	for i, v := range responseMsg.Users {
 		responseInterface[i] = v
 	}
-	resp, err = _createResponseFromArray(responseCode, responseInterface)
-	if err != nil {
-		log.Panic(err)
-	}
 
-	return resp
+	return _createResponseFromArray(responseCode, responseInterface)
 }
 
 func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
@@ -1282,7 +1154,6 @@ type Thread struct {
 
 // +
 func (t *Thread) updateBoolBasic(query string, value bool) string {
-	var resp string
 	args := Args{}
 
 	if !validateJson(t.inputRequest, "thread") {
@@ -1311,11 +1182,7 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 			return createNotExistResponse()
 		}
 
-		resp, err = _createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return resp
+		return _createResponse(responseCode, responseMsg)
 	}
 
 	responseCode := 0
@@ -1323,21 +1190,14 @@ func (t *Thread) updateBoolBasic(query string, value bool) string {
 		Thread: threadId,
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (t *Thread) close() string {
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
-	resp := t.updateBoolBasic(query, true)
-
-	return resp
+	return t.updateBoolBasic(query, true)
 }
 
 // +
@@ -1376,10 +1236,7 @@ func (t *Thread) create() string {
 		IsDeleted: t.inputRequest.json["isDeleted"].(bool),
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp = _createResponse(responseCode, responseMsg)
 
 	log.Printf("Thread '#%d' created", responseMsg.Id)
 
@@ -1391,10 +1248,7 @@ func (t *Thread) create() string {
 func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
 	query := "SELECT t.* FROM thread t WHERE t.id = ?"
 
-	getThread, err := selectQuery(query, &args.data, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getThread := selectQuery(query, &args.data, t.db)
 
 	if getThread.rows == 0 {
 		responseCode := 1
@@ -1425,10 +1279,7 @@ func (t *Thread) _getThreadDetails(args Args) (int, *rs.ThreadDetails) {
 
 // +
 func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.ThreadList) {
-	getThread, err := selectQuery(query, &args.data, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getThread := selectQuery(query, &args.data, t.db)
 
 	if getThread.rows == 0 {
 		responseCode := 1
@@ -1467,7 +1318,6 @@ func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.Thre
 // +
 // Проверка на пустой ответ с кодом 1 после _getThreadDetails()
 func (t *Thread) details() string {
-	var resp string
 	var relatedUser, relatedForum bool
 
 	if len(t.inputRequest.query["thread"]) != 1 {
@@ -1509,12 +1359,7 @@ func (t *Thread) details() string {
 		responseMsg.Forum = forumDetails
 	}
 
-	resp, err := _createResponse(responseCode, responseMsg)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
@@ -1567,9 +1412,6 @@ func (t *Thread) listBasic() (int, *rs.ThreadList) {
 // Rewrite subquery
 // +
 func (t *Thread) list() string {
-	var resp string
-	// args := Args{}
-
 	responseCode, responseMsg := t.listBasic()
 
 	if responseCode != 0 {
@@ -1581,12 +1423,7 @@ func (t *Thread) list() string {
 		responseInterface[i] = v
 	}
 
-	resp, err := _createResponseFromArray(responseCode, responseInterface)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	return resp
+	return _createResponseFromArray(responseCode, responseInterface)
 }
 
 // +
@@ -1619,10 +1456,7 @@ func (t *Thread) parentTree(order string) (int, *rs.PostList) {
 	// query here
 	//
 
-	getPost, err := selectQuery(query, &args.data, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getPost := selectQuery(query, &args.data, t.db)
 
 	if getPost.rows == 0 {
 		responseCode := 1
@@ -1641,10 +1475,7 @@ func (t *Thread) parentTree(order string) (int, *rs.PostList) {
 		subArgs.append(t.inputRequest.query["thread"][0])
 		subArgs.append(value["parent"] + "%")
 
-		getSubPost, err := selectQuery(subQuery, &subArgs.data, t.db)
-		if err != nil {
-			log.Panic(err)
-		}
+		getSubPost := selectQuery(subQuery, &subArgs.data, t.db)
 
 		for _, subValue := range getSubPost.values {
 			respId := stringToInt64(subValue["id"])
@@ -1712,9 +1543,7 @@ func (t *Thread) listPosts() string {
 
 	// sort here
 	if len(t.inputRequest.query["sort"]) >= 1 {
-		sortType := t.inputRequest.query["sort"][0]
-
-		switch sortType {
+		switch sortType := t.inputRequest.query["sort"][0]; sortType {
 		case "flat":
 			sort = " ORDER BY date " + order
 		case "tree":
@@ -1724,8 +1553,6 @@ func (t *Thread) listPosts() string {
 		default:
 			return createInvalidResponse()
 		}
-
-		fmt.Println("sortType =", sortType)
 	} else {
 		sort = " ORDER BY date " + order
 	}
@@ -1748,7 +1575,7 @@ func (t *Thread) listPosts() string {
 		for i, v := range responseMsg.Posts {
 			responseInterface[i] = v
 		}
-		resp, _ = _createResponseFromArray(responseCode, responseInterface)
+		resp = _createResponseFromArray(responseCode, responseInterface)
 	} else if responseCode == 1 {
 		resp = becauseAPI()
 	} else {
@@ -1762,9 +1589,7 @@ func (t *Thread) listPosts() string {
 func (t *Thread) open() string {
 	query := "UPDATE thread SET isClosed = ? WHERE id = ?"
 
-	resp := t.updateBoolBasic(query, false)
-
-	return resp
+	return t.updateBoolBasic(query, false)
 }
 
 // +
@@ -1788,9 +1613,7 @@ func (t *Thread) restore() string {
 
 	query = "UPDATE thread t SET t.isDeleted = ?, t.posts = (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) WHERE t.id = ?"
 
-	resp := t.updateBoolBasic(query, false)
-
-	return resp
+	return t.updateBoolBasic(query, false)
 }
 
 // +
@@ -1833,10 +1656,7 @@ func (t *Thread) subscribe() string {
 		User:   t.inputRequest.json["user"].(string),
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp = _createResponse(responseCode, responseMsg)
 
 	log.Printf("User '%s' subscribe to thread '#%d'", responseMsg.User, responseMsg.Thread)
 
@@ -1878,10 +1698,7 @@ func (t *Thread) unsubscribe() string {
 		User:   t.inputRequest.json["user"].(string),
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
+	resp = _createResponse(responseCode, responseMsg)
 
 	log.Printf("User '%s' unsubscribe from thread '#%d'", responseMsg.User, responseMsg.Thread)
 
@@ -1890,7 +1707,6 @@ func (t *Thread) unsubscribe() string {
 
 // +
 func (t *Thread) update() string {
-	var resp string
 	args := Args{}
 
 	query := "UPDATE thread SET message = ?, slug = ? WHERE id = ?"
@@ -1920,16 +1736,12 @@ func (t *Thread) update() string {
 		return createNotExistResponse()
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (t *Thread) vote() string {
-	var resp, query string
+	var query string
 	args := Args{}
 
 	if !validateJson(t.inputRequest, "thread", "vote") {
@@ -1966,11 +1778,7 @@ func (t *Thread) vote() string {
 		return createNotExistResponse()
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
@@ -2052,7 +1860,6 @@ func (p *Post) threadCounter(operation string, thread string, isDeleted bool) {
 
 // +
 func (p *Post) create() string {
-	var resp string
 	args := Args{}
 
 	query := "INSERT INTO post (thread, message, user, forum, date, isApproved, isHighlighted, isEdited, isSpam, isDeleted, parent) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -2084,10 +1891,7 @@ func (p *Post) create() string {
 		parentArgs := Args{}
 		parentArgs.append(parent)
 
-		getThread, err := selectQuery(parentQuery, &parentArgs.data, p.db)
-		if err != nil {
-			log.Panic(err)
-		}
+		getThread := selectQuery(parentQuery, &parentArgs.data, p.db)
 
 		// check query
 		if getThread.rows == 0 {
@@ -2103,10 +1907,7 @@ func (p *Post) create() string {
 		parentQuery = "SELECT parent FROM post WHERE parent LIKE ? ORDER BY parent desc LIMIT 1"
 		parentArgs.append(getParent + "%")
 
-		getThread, err = selectQuery(parentQuery, &parentArgs.data, p.db)
-		if err != nil {
-			log.Panic(err)
-		}
+		getThread = selectQuery(parentQuery, &parentArgs.data, p.db)
 
 		if getThread.values[0]["parent"] == getParent {
 			newParent := getParent
@@ -2178,12 +1979,7 @@ func (p *Post) create() string {
 		responseMsg.Parent = &tempParent
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
@@ -2199,7 +1995,7 @@ func (p *Post) getParentId(id int64, path string) int {
 		args := Args{}
 		args.append(parentId)
 
-		getParent, _ := selectQuery(query, &args.data, p.db)
+		getParent := selectQuery(query, &args.data, p.db)
 
 		respId := stringToInt64(getParent.values[0]["id"])
 
@@ -2210,7 +2006,6 @@ func (p *Post) getParentId(id int64, path string) int {
 // +
 // Return true if need threadCounter()
 func (p *Post) updateBoolBasic(query string, value bool) (bool, string) {
-	var resp string
 	args := Args{}
 
 	if !validateJson(p.inputRequest, "post") {
@@ -2240,11 +2035,7 @@ func (p *Post) updateBoolBasic(query string, value bool) (bool, string) {
 			return false, createNotExistResponse()
 		}
 
-		resp, err = _createResponse(responseCode, responseMsg)
-		if err != nil {
-			panic(err.Error())
-		}
-		return false, resp
+		return false, _createResponse(responseCode, responseMsg)
 	}
 
 	responseCode := 0
@@ -2252,22 +2043,14 @@ func (p *Post) updateBoolBasic(query string, value bool) (bool, string) {
 		Post: postId,
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return true, resp
+	return true, _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (p *Post) _getPostDetails(args Args) (int, *rs.PostDetails) {
 	query := "SELECT * FROM post WHERE id = ?"
 
-	getPost, err := selectQuery(query, &args.data, p.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getPost := selectQuery(query, &args.data, p.db)
 
 	if getPost.rows == 0 {
 		responseCode := 1
@@ -2297,8 +2080,7 @@ func (p *Post) _getPostDetails(args Args) (int, *rs.PostDetails) {
 		User:          getPost.values[0]["user"],
 	}
 
-	parent := p.getParentId(respId, getPost.values[0]["parent"])
-	if parent == int(respId) {
+	if parent := p.getParentId(respId, getPost.values[0]["parent"]); parent == int(respId) {
 		responseMsg.Parent = nil
 	} else {
 		tempParent := int64(parent)
@@ -2310,7 +2092,6 @@ func (p *Post) _getPostDetails(args Args) (int, *rs.PostDetails) {
 
 // +
 func (p *Post) details() string {
-	var resp string
 	var relatedUser, relatedThread, relatedForum bool
 	args := Args{}
 
@@ -2331,9 +2112,7 @@ func (p *Post) details() string {
 
 	responseCode, responseMsg := p._getPostDetails(args)
 	if responseCode != 0 {
-		resp, _ := _createResponse(responseCode, responseMsg)
-
-		return resp
+		return _createResponse(responseCode, responseMsg)
 	}
 
 	if relatedUser {
@@ -2366,20 +2145,12 @@ func (p *Post) details() string {
 		responseMsg.Forum = forumDetails
 	}
 
-	resp, err := _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (p *Post) _getArrayPostDetails(query string, args Args) (int, *rs.PostList) {
-	getPost, err := selectQuery(query, &args.data, p.db)
-	if err != nil {
-		log.Panic(err)
-	}
+	getPost := selectQuery(query, &args.data, p.db)
 
 	if getPost.rows == 0 {
 		responseCode := 1
@@ -2491,7 +2262,7 @@ func (p *Post) list() string {
 		for i, v := range responseMsg.Posts {
 			responseInterface[i] = v
 		}
-		resp, _ = _createResponseFromArray(responseCode, responseInterface)
+		resp = _createResponseFromArray(responseCode, responseInterface)
 	} else if responseCode == 1 {
 		resp = becauseAPI()
 	} else {
@@ -2535,7 +2306,6 @@ func (p *Post) restore() string {
 
 // +
 func (p *Post) update() string {
-	var resp string
 	query := "UPDATE post SET message = ? WHERE id = ?"
 
 	args := Args{}
@@ -2572,16 +2342,12 @@ func (p *Post) update() string {
 		return createNotExistResponse()
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 // +
 func (p *Post) vote() string {
-	var resp, query string
+	var query string
 	args := Args{}
 
 	if !validateJson(p.inputRequest, "post", "vote") {
@@ -2618,11 +2384,7 @@ func (p *Post) vote() string {
 		return createNotExistResponse()
 	}
 
-	resp, err = _createResponse(responseCode, responseMsg)
-	if err != nil {
-		panic(err.Error())
-	}
-	return resp
+	return _createResponse(responseCode, responseMsg)
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
@@ -2667,19 +2429,19 @@ func statusHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 		args := Args{}
 
 		query := "SELECT COUNT(*) count FROM user"
-		dbResp, _ := selectQuery(query, &args.data, db)
+		dbResp := selectQuery(query, &args.data, db)
 		respUsers := stringToInt64(dbResp.values[0]["count"])
 
 		query = "SELECT COUNT(*) count FROM thread"
-		dbResp, _ = selectQuery(query, &args.data, db)
+		dbResp = selectQuery(query, &args.data, db)
 		respThreads := stringToInt64(dbResp.values[0]["count"])
 
 		query = "SELECT COUNT(*) count FROM forum"
-		dbResp, _ = selectQuery(query, &args.data, db)
+		dbResp = selectQuery(query, &args.data, db)
 		respForums := stringToInt64(dbResp.values[0]["count"])
 
 		query = "SELECT COUNT(*) count FROM post"
-		dbResp, _ = selectQuery(query, &args.data, db)
+		dbResp = selectQuery(query, &args.data, db)
 		respPosts := stringToInt64(dbResp.values[0]["count"])
 
 		responseCode := 0
@@ -2689,9 +2451,8 @@ func statusHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 			Forum:  respForums,
 			Post:   respPosts,
 		}
-		resp, _ := _createResponse(responseCode, responseMsg)
 
-		io.WriteString(w, resp)
+		io.WriteString(w, _createResponse(responseCode, responseMsg))
 	}
 }
 
@@ -2757,17 +2518,13 @@ func main() {
 		panic(err.Error())
 	}
 
+	// args here
 	argsWithProg := os.Args[1:]
-
 	MAX_DB_CONNECTIONS := int(stringToInt64(argsWithProg[1]))
-
 	db.SetMaxOpenConns(MAX_DB_CONNECTIONS)
-
 	PORT := ":" + argsWithProg[0]
 
 	fmt.Printf("The server is running on http://localhost%s\n", PORT)
-
-	// go initLog()
 
 	// config here
 	f, err := os.Open("app.conf")
@@ -2799,15 +2556,9 @@ func check(e error) {
 	}
 }
 
-func floatToString(inputNum float64) string {
-	// to convert a float number to a string
-	return strconv.FormatFloat(inputNum, 'f', 6, 64)
-}
+func floatToString(inputNum float64) string { return strconv.FormatFloat(inputNum, 'f', 6, 64) }
 
-func int64ToString(inputNum int64) string {
-	// to convert a float number to a string
-	return strconv.FormatInt(inputNum, 10)
-}
+func int64ToString(inputNum int64) string { return strconv.FormatInt(inputNum, 10) }
 
 func checkFloat64Type(inputNum interface{}) bool {
 	if reflect.TypeOf(inputNum).Kind() != reflect.Float64 {
@@ -2833,14 +2584,9 @@ func stringToInt(inputStr string) int {
 	return result
 }
 
-func stringToInt64(inputStr string) int64 {
-	return int64(stringToInt(inputStr))
-}
+func stringToInt64(inputStr string) int64 { return int64(stringToInt(inputStr)) }
 
-func incInt(value *int) int {
-	*value += 1
-	return *value
-}
+func incInt(value *int) int { return *value + 1 }
 
 func toBase92(value int) string {
 	BASE92 := ` !"#$&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^` + "`" + `abcdefghijklmnopqrstuvwxyz{|}~`
@@ -2889,12 +2635,12 @@ func fromBase92(value string) int {
 	return result
 }
 
-func stringToBool(inputString string) (result bool) {
+func stringToBool(inputString string) bool {
 	result, err := strconv.ParseBool(inputString)
 
 	if err != nil {
 		log.Panic(err)
 	}
 
-	return
+	return result
 }
