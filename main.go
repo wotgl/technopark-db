@@ -1489,10 +1489,12 @@ func (t *Thread) listBasic() (int, *rs.ThreadList) {
 
 	// Validate query values
 	if len(t.inputRequest.query["user"]) == 1 {
-		query = "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
+		// query = "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.user = ?"
+		query = "SELECT t.* FROM thread t WHERE t.user = ?"
 		args.append(t.inputRequest.query["user"][0])
 	} else if len(t.inputRequest.query["forum"]) == 1 {
-		query = "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
+		// query = "SELECT t.* FROM thread t LEFT JOIN post p ON t.id=p.thread WHERE t.forum = ?"
+		query = "SELECT t.* FROM thread t WHERE t.forum = ?"
 		args.append(t.inputRequest.query["forum"][0])
 	} else {
 		return 100500, nil
@@ -1504,7 +1506,7 @@ func (t *Thread) listBasic() (int, *rs.ThreadList) {
 		args.append(t.inputRequest.query["since"][0])
 	}
 
-	query = query + " GROUP BY t.id"
+	// query = query + " GROUP BY t.id"
 	if len(t.inputRequest.query["order"]) >= 1 {
 		orderType := t.inputRequest.query["order"][0]
 		if orderType != "desc" && orderType != "asc" {
