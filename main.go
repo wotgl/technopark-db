@@ -310,35 +310,6 @@ type ExecResponse struct {
 	rowCount int64
 }
 
-func _execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, error) {
-	resp := new(ExecResponse)
-
-	stmt, err := db.Prepare(query)
-	if err != nil {
-		return nil, err
-	}
-	defer stmt.Close()
-
-	res, err := stmt.Exec(*args...)
-	if err != nil {
-		return nil, err
-	}
-	lastId, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	rowCnt, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	// log.Printf("ID = %d, affected = %d\n", lastId, rowCnt)
-
-	resp.lastId = lastId
-	resp.rowCount = rowCnt
-
-	return resp, nil
-}
-
 func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, error) {
 	resp := new(ExecResponse)
 
@@ -571,65 +542,6 @@ func (u *User) _getUserDetails(args Args) (int, *rs.UserDetails) {
 	}
 	if respUsername == "NULL" {
 		responseMsg.Username = nil
-	}
-
-	return responseCode, responseMsg
-}
-
-// delete
-func (u *User) getUserDetails() (int, map[string]interface{}) {
-	query := "SELECT * FROM user WHERE email = ?"
-	var args []interface{}
-	args = append(args, u.inputRequest.query["user"][0])
-
-	getUser, err := selectQuery(query, &args, u.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	if getUser.rows == 0 {
-		responseCode := 1
-		errorMessage := map[string]interface{}{"msg": "Not found"}
-
-		return responseCode, errorMessage
-	}
-
-	// followers here
-	listFollowers := u.getUserFollowers(args[0].(string))
-
-	// following here
-	listFollowing := u.getUserFollowing(args[0].(string))
-
-	// subscriptions here
-	listSubscriptions := u.getUserSubscriptions(args[0].(string))
-
-	respIsAnonymous, _ := strconv.ParseBool(getUser.values[0]["isAnonymous"])
-	respId, _ := strconv.ParseInt(getUser.values[0]["id"], 10, 64)
-	respAbout := getUser.values[0]["about"]
-	respName := getUser.values[0]["name"]
-	respUsername := getUser.values[0]["username"]
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"about":         respAbout,
-		"email":         getUser.values[0]["email"],
-		"followers":     listFollowers,
-		"following":     listFollowing,
-		"id":            respId,
-		"isAnonymous":   respIsAnonymous,
-		"name":          respName,
-		"subscriptions": listSubscriptions,
-		"username":      respUsername,
-	}
-
-	if respAbout == "NULL" {
-		responseMsg["about"] = nil
-	}
-	if respName == "NULL" {
-		responseMsg["name"] = nil
-	}
-	if respUsername == "NULL" {
-		responseMsg["username"] = nil
 	}
 
 	return responseCode, responseMsg
@@ -1032,36 +944,6 @@ func (f *Forum) _getForumDetails(args Args) (int, *rs.ForumDetails) {
 	return responseCode, responseMsg
 }
 
-func (f *Forum) getForumDetails() (int, map[string]interface{}) {
-	query := "SELECT * FROM forum WHERE short_name = ?"
-	var args []interface{}
-	args = append(args, f.inputRequest.query["forum"][0])
-
-	getForum, err := selectQuery(query, &args, f.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	if getForum.rows == 0 {
-		responseCode := 1
-		errorMessage := map[string]interface{}{"msg": "Not found"}
-
-		return responseCode, errorMessage
-	}
-
-	respId, _ := strconv.ParseInt(getForum.values[0]["id"], 10, 64)
-
-	responseCode := 0
-	responseMsg := map[string]interface{}{
-		"id":         respId,
-		"short_name": getForum.values[0]["short_name"],
-		"name":       getForum.values[0]["name"],
-		"user":       getForum.values[0]["user"],
-	}
-
-	return responseCode, responseMsg
-}
-
 // +
 func (f *Forum) details() string {
 	var resp string
@@ -1157,7 +1039,7 @@ func (f *Forum) listThreads() string {
 	return resp
 }
 
-//
+// +
 func (f *Forum) listPosts() string {
 	var query, order, resp string
 	relatedUser := false
@@ -1437,14 +1319,8 @@ func (t *Thread) create() string {
 	args.generateFromJson(&t.inputRequest.json, "forum", "title", "isClosed", "user", "date", "message", "slug")
 
 	// Validate isDeleted param
-	isDeleted := t.inputRequest.json["isDeleted"]
-	if isDeleted == nil {
-		args.append(false)
-	} else {
-		if isDeleted != false && isDeleted != true {
-			return createInvalidResponse()
-		}
-		args.append(isDeleted)
+	if !validateBoolParams(t.inputRequest.json, &args, "isDeleted") {
+		return createInvalidJsonResponse(t.inputRequest)
 	}
 
 	dbResp, err := execQuery(query, &args.data, t.db)
@@ -1452,25 +1328,17 @@ func (t *Thread) create() string {
 		return createErrorResponse(err)
 	}
 
-	query = "SELECT * FROM thread WHERE id = ?"
-	args.clear()
-	args.append(dbResp.lastId)
-	newThread, err := selectQuery(query, &args.data, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
 	responseCode := 0
 	responseMsg := &rs.ThreadCreate{
-		Forum:     newThread.values[0]["forum"],
-		Title:     newThread.values[0]["title"],
+		Forum:     t.inputRequest.json["forum"].(string),
+		Title:     t.inputRequest.json["title"].(string),
 		Id:        dbResp.lastId,
-		User:      newThread.values[0]["user"],
-		Date:      newThread.values[0]["date"],
-		Message:   newThread.values[0]["message"],
-		Slug:      newThread.values[0]["slug"],
-		IsClosed:  stringToBool(newThread.values[0]["isClosed"]),
-		IsDeleted: stringToBool(newThread.values[0]["isDeleted"]),
+		User:      t.inputRequest.json["user"].(string),
+		Date:      t.inputRequest.json["date"].(string),
+		Message:   t.inputRequest.json["message"].(string),
+		Slug:      t.inputRequest.json["slug"].(string),
+		IsClosed:  t.inputRequest.json["isClosed"].(bool),
+		IsDeleted: t.inputRequest.json["isDeleted"].(bool),
 	}
 
 	resp, err = _createResponse(responseCode, responseMsg)
@@ -1556,58 +1424,6 @@ func (t *Thread) _getArrayThreadsDetails(query string, args Args) (int, *rs.Thre
 		}
 
 		responseMsg.Threads = append(responseMsg.Threads, *tempMsg)
-	}
-
-	return responseCode, responseMsg
-}
-
-func (t *Thread) getArrayThreadsDetails(query string, args []interface{}) (int, []map[string]interface{}) {
-	getThread, err := selectQuery(query, &args, t.db)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	if getThread.rows == 0 {
-		var responseMsg []map[string]interface{}
-		responseCode := 1
-		errorMessage := map[string]interface{}{
-			"msg": "Not found",
-		}
-		responseMsg = append(responseMsg, errorMessage)
-
-		// fmt.Println(responseCode, errorMessage)
-		return responseCode, responseMsg
-	}
-
-	responseCode := 0
-	var responseMsg []map[string]interface{}
-
-	for _, value := range getThread.values {
-		respId, _ := strconv.ParseInt(value["id"], 10, 64)
-		respLikes, _ := strconv.ParseInt(value["likes"], 10, 64)
-		respDislikes, _ := strconv.ParseInt(value["dislikes"], 10, 64)
-		respPoints, _ := strconv.ParseInt(value["points"], 10, 64)
-		respPosts, _ := strconv.ParseInt(value["posts"], 10, 64)
-		respIsClosed, _ := strconv.ParseBool(value["isClosed"])
-		respIsDeleted, _ := strconv.ParseBool(value["isDeleted"])
-
-		tempMsg := map[string]interface{}{
-			"date":      value["date"],
-			"dislikes":  respDislikes,
-			"forum":     value["forum"],
-			"id":        respId,
-			"isClosed":  respIsClosed,
-			"isDeleted": respIsDeleted,
-			"likes":     respLikes,
-			"message":   value["message"],
-			"points":    respPoints,
-			"posts":     respPosts,
-			"slug":      value["slug"],
-			"title":     value["title"],
-			"user":      value["user"],
-		}
-
-		responseMsg = append(responseMsg, tempMsg)
 	}
 
 	return responseCode, responseMsg
@@ -2243,8 +2059,6 @@ func (p *Post) create() string {
 		var child string
 		getParent := getThread.values[0]["parent"]
 
-		// OPTIMIZATION HERE: ADD LIMIT!!!
-		// parentQuery = "SELECT parent FROM post WHERE parent LIKE ?"
 		parentQuery = "SELECT parent FROM post WHERE parent LIKE ? ORDER BY parent desc LIMIT 1"
 		parentArgs.append(getParent + "%")
 
@@ -2269,26 +2083,6 @@ func (p *Post) create() string {
 
 			child = newParent + newChild
 		}
-
-		/*
-			// because the first element is parent
-			if getThread.rows == 1 {
-				newParent := getParent
-				newChild := toBase92(1)
-
-				child = newParent + newChild
-			} else {
-				lastChild := getThread.values[getThread.rows-1]["parent"]
-				newParent := getParent
-				oldChild := fromBase92(lastChild[len(lastChild)-5:])
-
-				oldChild++
-
-				newChild := toBase92(oldChild)
-
-				child = newParent + newChild
-			}
-		*/
 
 		args.append(child)
 		boolParent = false
@@ -2347,8 +2141,6 @@ func (p *Post) create() string {
 	if err != nil {
 		panic(err.Error())
 	}
-
-	// fmt.Println("post.create()")
 
 	return resp
 }
@@ -2963,11 +2755,6 @@ func check(e error) {
 func floatToString(inputNum float64) string {
 	// to convert a float number to a string
 	return strconv.FormatFloat(inputNum, 'f', 6, 64)
-}
-
-func intToString(inputNum int) string {
-	// to convert a float number to a string
-	return strconv.Itoa(inputNum)
 }
 
 func int64ToString(inputNum int64) string {
