@@ -317,7 +317,6 @@ func execQuery(query string, args *[]interface{}, db *sql.DB) (*ExecResponse, er
 	if err != nil {
 		return nil, err
 	}
-
 	defer tx.Commit()
 
 	stmt, err := tx.Prepare(query)
