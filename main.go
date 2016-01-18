@@ -357,6 +357,44 @@ type SelectResponse struct {
 func selectQuery(query string, args *[]interface{}, db *sql.DB) (*SelectResponse, error) {
 	resp := new(SelectResponse)
 
+	/*
+		f := false
+		_query := query
+		for _, value := range *args {
+			var tmp string
+			switch reflect.TypeOf(value).Kind() {
+			case reflect.Float64:
+				tmp = floatToString(value.(float64))
+			case reflect.String:
+				tmp = value.(string)
+			case reflect.Bool:
+				tmp = strconv.FormatBool(value.(bool))
+			case reflect.Int64:
+				tmp = int64ToString(value.(int64))
+			}
+
+			if strings.ContainsAny(tmp, ` !"#$&'()*+,-.\/:;<=>?@[\]^`+"`"+`{|}~`) {
+				f = true
+				break
+			} else {
+				if reflect.TypeOf(value).Kind() == reflect.String {
+					tmp = "\"" + value.(string) + "\""
+				}
+
+				fmt.Println(_query)
+				_query = strings.Replace(_query, "?", tmp, 1)
+			}
+		}
+
+		var rows *sql.Rows
+		var err error
+
+		if f {
+			rows, err = db.Query(query, *args...)
+		} else {
+			rows, err = db.Query(_query)
+		}
+	*/
 	rows, err := db.Query(query, *args...)
 	if err != nil {
 		panic(err.Error())
@@ -832,6 +870,7 @@ func (u *User) updateProfile() string {
 }
 
 func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	//t0 := time.Now()
 	user := User{inputRequest: inputRequest, db: db}
 
 	var result string
@@ -860,6 +899,8 @@ func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 		}
 	}
 
+	// t1 := time.Now()
+	// fmt.Printf("User handler: %v\n", t1.Sub(t0))
 	io.WriteString(w, result)
 }
 
@@ -1201,6 +1242,7 @@ func (f *Forum) listUsers() string {
 }
 
 func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	//t0 := time.Now()
 	forum := Forum{inputRequest: inputRequest, db: db}
 
 	var result string
@@ -1224,6 +1266,8 @@ func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputReq
 		}
 	}
 
+	// t1 := time.Now()
+	// fmt.Printf("Forum handler: %v\n", t1.Sub(t0))
 	io.WriteString(w, result)
 }
 
@@ -1930,6 +1974,7 @@ func (t *Thread) vote() string {
 }
 
 func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	//t0 := time.Now()
 	thread := Thread{inputRequest: inputRequest, db: db}
 
 	var result string
@@ -1973,6 +2018,8 @@ func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRe
 		// }
 	}
 
+	// t1 := time.Now()
+	// fmt.Printf("Thread handler: %v\n", t1.Sub(t0))
 	io.WriteString(w, result)
 }
 
@@ -2579,6 +2626,7 @@ func (p *Post) vote() string {
 }
 
 func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
+	//t0 := time.Now()
 	post := Post{inputRequest: inputRequest, db: db}
 
 	var result string
@@ -2606,6 +2654,8 @@ func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequ
 		}
 	}
 
+	// t1 := time.Now()
+	// fmt.Printf("Post handler: %v\n", t1.Sub(t0))
 	io.WriteString(w, result)
 }
 
@@ -2681,8 +2731,11 @@ func clearHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputReq
 
 func makeHandler(db *sql.DB, fn func(http.ResponseWriter, *http.Request, *InputRequest, *sql.DB)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		//t0 := time.Now()
 		inputRequest := new(InputRequest)
 		inputRequest.parse(r)
+		// t1 := time.Now()
+		// fmt.Printf("Parse time: %v\n", t1.Sub(t0))
 
 		fn(w, r, inputRequest, db)
 	}
@@ -2727,11 +2780,11 @@ func main() {
 		http.HandleFunc("/db/api/clear/", makeHandler(db, clearHandler))
 	}
 
-	http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
-	http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
-	http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
-	http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
-	http.HandleFunc("/db/api/status/", makeHandler(db, statusHandler))
+	go http.HandleFunc("/db/api/user/", makeHandler(db, userHandler))
+	go http.HandleFunc("/db/api/forum/", makeHandler(db, forumHandler))
+	go http.HandleFunc("/db/api/thread/", makeHandler(db, threadHandler))
+	go http.HandleFunc("/db/api/post/", makeHandler(db, postHandler))
+	go http.HandleFunc("/db/api/status/", makeHandler(db, statusHandler))
 
 	http.ListenAndServe(PORT, nil)
 }
