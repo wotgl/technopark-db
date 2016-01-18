@@ -1932,7 +1932,7 @@ func (t *Thread) restore() string {
 
 	_ = t.updateBoolBasic(query, false)
 
-	query = "UPDATE thread t SET t.isDeleted = ?, t.posts = (SELECT COUNT(*) FROM post p WHERE p.thread = t.id) WHERE t.id = ?"
+	query = "UPDATE thread t SET t.isDeleted = ?, t.posts = (SELECT COUNT(*) FROM post p WHERE p.thread = t.id AND p.isDeleted = false) WHERE t.id = ?"
 
 	resp := t.updateBoolBasic(query, false)
 
@@ -2244,7 +2244,8 @@ func (p *Post) create() string {
 		getParent := getThread.values[0]["parent"]
 
 		// OPTIMIZATION HERE: ADD LIMIT!!!
-		parentQuery = "SELECT parent FROM post WHERE parent LIKE ?"
+		// parentQuery = "SELECT parent FROM post WHERE parent LIKE ?"
+		parentQuery = "SELECT parent FROM post WHERE parent LIKE ? ORDER BY parent desc LIMIT 1"
 		parentArgs.append(getParent + "%")
 
 		getThread, err = selectQuery(parentQuery, &parentArgs.data, p.db)
@@ -2252,14 +2253,13 @@ func (p *Post) create() string {
 			log.Panic(err)
 		}
 
-		// because the first element is parent
-		if getThread.rows == 1 {
+		if getThread.values[0]["parent"] == getParent {
 			newParent := getParent
 			newChild := toBase92(1)
 
 			child = newParent + newChild
 		} else {
-			lastChild := getThread.values[getThread.rows-1]["parent"]
+			lastChild := getThread.values[0]["parent"]
 			newParent := getParent
 			oldChild := fromBase92(lastChild[len(lastChild)-5:])
 
@@ -2269,6 +2269,26 @@ func (p *Post) create() string {
 
 			child = newParent + newChild
 		}
+
+		/*
+			// because the first element is parent
+			if getThread.rows == 1 {
+				newParent := getParent
+				newChild := toBase92(1)
+
+				child = newParent + newChild
+			} else {
+				lastChild := getThread.values[getThread.rows-1]["parent"]
+				newParent := getParent
+				oldChild := fromBase92(lastChild[len(lastChild)-5:])
+
+				oldChild++
+
+				newChild := toBase92(oldChild)
+
+				child = newParent + newChild
+			}
+		*/
 
 		args.append(child)
 		boolParent = false
