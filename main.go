@@ -587,7 +587,6 @@ func (u *User) getDetails() string {
 // +
 func (u *User) follow() string {
 	query := "INSERT INTO follow (follower, followee) VALUES(?, ?)"
-
 	args := Args{}
 
 	if !validateJson(u.inputRequest, "follower", "followee") {
@@ -730,7 +729,6 @@ func (u *User) listPosts() string {
 // +
 func (u *User) unfollow() string {
 	query := "DELETE FROM follow WHERE follower = ? AND followee = ?"
-
 	args := Args{}
 
 	if !validateJson(u.inputRequest, "follower", "followee") {
@@ -752,7 +750,6 @@ func (u *User) unfollow() string {
 // +
 func (u *User) updateProfile() string {
 	query := "UPDATE user SET about = ?, name = ? WHERE email =  ?"
-
 	args := Args{}
 
 	if !validateJson(u.inputRequest, "about", "name", "user") {
@@ -774,29 +771,28 @@ func (u *User) updateProfile() string {
 func userHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	//t0 := time.Now()
 	user := User{inputRequest: inputRequest, db: db}
-
 	var result string
 
 	if inputRequest.method == "GET" {
-		if inputRequest.path == "/db/api/user/details/" {
+		switch inputRequest.path {
+		case "/db/api/user/details/":
 			result = user.getDetails()
-		} else if inputRequest.path == "/db/api/user/listFollowers/" {
+		case "/db/api/user/listFollowers/":
 			result = user.listFollowers()
-		} else if inputRequest.path == "/db/api/user/listFollowing/" {
+		case "/db/api/user/listFollowing/":
 			result = user.listFollowing()
-		} else if inputRequest.path == "/db/api/user/listPosts/" {
+		case "/db/api/user/listPosts/":
 			result = user.listPosts()
 		}
 	} else if inputRequest.method == "POST" {
-
-		// Like Router
-		if inputRequest.path == "/db/api/user/create/" {
+		switch inputRequest.path {
+		case "/db/api/user/create/":
 			result = user.create()
-		} else if inputRequest.path == "/db/api/user/follow/" {
+		case "/db/api/user/follow/":
 			result = user.follow()
-		} else if inputRequest.path == "/db/api/user/unfollow/" {
+		case "/db/api/user/unfollow/":
 			result = user.unfollow()
-		} else if inputRequest.path == "/db/api/user/updateProfile/" {
+		case "/db/api/user/updateProfile/":
 			result = user.updateProfile()
 		}
 	}
@@ -875,7 +871,6 @@ func (f *Forum) _getForumDetails(args Args) (int, *rs.ForumDetails) {
 // +
 func (f *Forum) details() string {
 	var relatedUser bool
-
 	args := Args{}
 
 	if len(f.inputRequest.query["forum"]) != 1 {
@@ -1047,7 +1042,6 @@ func (f *Forum) listUsers() string {
 	var query string
 	args := Args{}
 
-	// query = "SELECT DISTINCT p.user FROM post p JOIN user u ON p.user=u.email WHERE p.forum = ?"
 	query = "SELECT u.email FROM user u WHERE email IN (SELECT DISTINCT p.user FROM post p WHERE p.forum = ?)"
 
 	// Validate query values
@@ -1116,24 +1110,22 @@ func (f *Forum) listUsers() string {
 func forumHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	//t0 := time.Now()
 	forum := Forum{inputRequest: inputRequest, db: db}
-
 	var result string
 
 	if inputRequest.method == "GET" {
-
-		if inputRequest.path == "/db/api/forum/details/" {
+		switch inputRequest.path {
+		case "/db/api/forum/details/":
 			result = forum.details()
-		} else if inputRequest.path == "/db/api/forum/listPosts/" {
+		case "/db/api/forum/listPosts/":
 			result = forum.listPosts()
-		} else if inputRequest.path == "/db/api/forum/listThreads/" {
+		case "/db/api/forum/listThreads/":
 			result = forum.listThreads()
-		} else if inputRequest.path == "/db/api/forum/listUsers/" {
+		case "/db/api/forum/listUsers/":
 			result = forum.listUsers()
 		}
 	} else if inputRequest.method == "POST" {
-
-		// Like Router
-		if inputRequest.path == "/db/api/forum/create/" {
+		switch inputRequest.path {
+		case "/db/api/forum/create/":
 			result = forum.create()
 		}
 	}
@@ -1784,46 +1776,38 @@ func (t *Thread) vote() string {
 func threadHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	//t0 := time.Now()
 	thread := Thread{inputRequest: inputRequest, db: db}
-
 	var result string
 
 	if inputRequest.method == "GET" {
-
-		// Like Router
-		if inputRequest.path == "/db/api/thread/details/" {
+		switch inputRequest.path {
+		case "/db/api/thread/details/":
 			result = thread.details()
-		} else if inputRequest.path == "/db/api/thread/list/" {
+		case "/db/api/thread/list/":
 			result = thread.list()
-		} else if inputRequest.path == "/db/api/thread/listPosts/" {
+		case "/db/api/thread/listPosts/":
 			result = thread.listPosts()
 		}
 	} else if inputRequest.method == "POST" {
-
-		// Like Router
-		if inputRequest.path == "/db/api/thread/create/" {
+		switch inputRequest.path {
+		case "/db/api/thread/create/":
 			result = thread.create()
-		} else if inputRequest.path == "/db/api/thread/close/" {
+		case "/db/api/thread/close/":
 			result = thread.close()
-		} else if inputRequest.path == "/db/api/thread/restore/" {
+		case "/db/api/thread/restore/":
 			result = thread.restore()
-		} else if inputRequest.path == "/db/api/thread/vote/" {
+		case "/db/api/thread/vote/":
 			result = thread.vote()
-		} else if inputRequest.path == "/db/api/thread/remove/" {
+		case "/db/api/thread/remove/":
 			result = thread.remove()
-		} else if inputRequest.path == "/db/api/thread/open/" {
+		case "/db/api/thread/open/":
 			result = thread.open()
-		} else if inputRequest.path == "/db/api/thread/update/" {
+		case "/db/api/thread/update/":
 			result = thread.update()
-		} else if inputRequest.path == "/db/api/thread/subscribe/" {
+		case "/db/api/thread/subscribe/":
 			result = thread.subscribe()
-		} else if inputRequest.path == "/db/api/thread/unsubscribe/" {
+		case "/db/api/thread/unsubscribe/":
 			result = thread.unsubscribe()
 		}
-		// else if inputRequest.path == "/db/api/user/unfollow/" {
-		// 	result = user.unfollow()
-		// } else if inputRequest.path == "/db/api/user/updateProfile/" {
-		// 	result = user.updateProfile()
-		// }
 	}
 
 	// t1 := time.Now()
@@ -2390,28 +2374,26 @@ func (p *Post) vote() string {
 func postHandler(w http.ResponseWriter, r *http.Request, inputRequest *InputRequest, db *sql.DB) {
 	//t0 := time.Now()
 	post := Post{inputRequest: inputRequest, db: db}
-
 	var result string
 
 	if inputRequest.method == "GET" {
-		// Like Router
-		if inputRequest.path == "/db/api/post/details/" {
+		switch inputRequest.path {
+		case "/db/api/post/details/":
 			result = post.details()
-		} else if inputRequest.path == "/db/api/post/list/" {
+		case "/db/api/post/list/":
 			result = post.list()
 		}
 	} else if inputRequest.method == "POST" {
-
-		// Like Router
-		if inputRequest.path == "/db/api/post/create/" {
+		switch inputRequest.path {
+		case "/db/api/post/create/":
 			result = post.create()
-		} else if inputRequest.path == "/db/api/post/restore/" {
+		case "/db/api/post/restore/":
 			result = post.restore()
-		} else if inputRequest.path == "/db/api/post/vote/" {
+		case "/db/api/post/vote/":
 			result = post.vote()
-		} else if inputRequest.path == "/db/api/post/remove/" {
+		case "/db/api/post/remove/":
 			result = post.remove()
-		} else if inputRequest.path == "/db/api/post/update/" {
+		case "/db/api/post/update/":
 			result = post.update()
 		}
 	}
